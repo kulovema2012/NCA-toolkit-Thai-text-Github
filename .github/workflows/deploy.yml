@@ -15,7 +15,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - id: auth
       uses: google-github-actions/auth@v1
@@ -57,7 +57,54 @@ jobs:
           --min-instances=0 \
           --max-instances=5 \
           --timeout=300s \
-          --set-env-vars=GCP_BUCKET_NAME=${{ secrets.GCP_BUCKET_NAME }},GCP_SA_CREDENTIALS=${{ secrets.GCP_SA_KEY }}
+          --set-env-vars=GCP_BUCKET_NAME=${{ secrets.GCP_BUCKET_NAME }},GCP_SA_CREDENTIALS=${{ secrets.GCP_SA_KEY }},API_KEY=${{ secrets.API_KEY }}
+
+    - name: Health Check
+      run: |
+        SERVICE_URL="https://${{ env.SERVICE_NAME }}-${{ env.PROJECT_ID }}.run.app/health"
+        echo "=== Starting Health Check ==="
+        echo "Service URL: $SERVICE_URL"
+        echo "Waiting for service to become healthy..."
+        
+        for i in {1..10}; do
+          echo "\nAttempt $i/10:"
+          RESPONSE=$(curl -si -X GET "$SERVICE_URL" \
+            -H "Content-Type: application/json" \
+            -H "X-API-Key: ${{ secrets.API_KEY }}" \
+            -w "\nHTTP_STATUS:%{http_code}" \
+            -o response_body.txt)
+          
+          HTTP_STATUS=$(grep 'HTTP_STATUS:' <<< "$RESPONSE" | cut -d':' -f2 | xargs)
+          
+          echo "Response Status: $HTTP_STATUS"
+          echo "Response Body:"
+          cat response_body.txt
+          
+          case $HTTP_STATUS in
+            200) 
+              echo " Health check passed!"
+              exit 0
+              ;;
+            401) 
+              echo ""
+              ;;
+            502|503|504)
+              echo ""
+              ;;
+            *)
+              echo ""
+              ;;
+          esac
+          
+          sleep $((i*5))
+        done
+        
+        echo ""
+        echo "=== Debug Information ==="
+        echo "1. Verify service logs in Google Cloud Console"
+        echo "2. Check API_KEY is correctly set"
+        echo "3. Test manually: curl -v $SERVICE_URL"
+        exit 1
 
     - name: Show Output
       run: echo "Deployed to https://${{ env.SERVICE_NAME }}-${{ env.PROJECT_ID }}.run.app"
