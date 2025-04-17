@@ -39,27 +39,13 @@ jobs:
         docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }} .
         docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
 
-    - name: Create env file
-      run: |
-        # Create temporary env file with properly escaped values
-        echo "GCP_BUCKET_NAME=${{ secrets.GCP_BUCKET_NAME }}" > env.yaml
-        echo "API_KEY=${{ secrets.API_KEY }}" >> env.yaml
-        
-        # Write service account key to a separate file
-        echo '${{ secrets.GCP_SA_KEY }}' > sa-key.json
-        
-        # Verify files were created properly (without showing content)
-        echo "Environment file created"
-        ls -la env.yaml
-        echo "Service account key file created"
-        ls -la sa-key.json
-
     - name: Deploy to Cloud Run
       id: deploy
       run: |
+        # Set image URI
         IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}"
         
-        # Deploy with env vars from file and service account from file
+        # Deploy using individual environment variables
         gcloud run deploy ${{ env.SERVICE_NAME }} \
           --image $IMAGE_URI \
           --project ${{ env.PROJECT_ID }} \
@@ -72,13 +58,16 @@ jobs:
           --min-instances=0 \
           --max-instances=5 \
           --timeout=300s \
-          --update-env-vars-file=env.yaml \
-          --update-env-vars GCP_SA_CREDENTIALS="$(cat sa-key.json)"
-
-    - name: Clean up sensitive files
-      if: always()
-      run: |
-        rm -f env.yaml sa-key.json
+          --set-env-vars="GCP_BUCKET_NAME=${{ secrets.GCP_BUCKET_NAME }}" \
+          --set-env-vars="API_KEY=${{ secrets.API_KEY }}"
+          
+        # Now update the service account separately to avoid escaping issues
+        echo '${{ secrets.GCP_SA_KEY }}' > /tmp/sa-key.json
+        cat /tmp/sa-key.json | gcloud run services update ${{ env.SERVICE_NAME }} \
+          --project ${{ env.PROJECT_ID }} \
+          --region ${{ env.REGION }} \
+          --update-env-vars="GCP_SA_CREDENTIALS=$(cat /tmp/sa-key.json | tr -d '\n' | sed 's/"/\\"/g')"
+        rm -f /tmp/sa-key.json
 
     - name: Health Check
       run: |
