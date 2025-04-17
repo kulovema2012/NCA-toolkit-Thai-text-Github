@@ -39,12 +39,27 @@ jobs:
         docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }} .
         docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
 
+    - name: Create env file
+      run: |
+        # Create temporary env file with properly escaped values
+        echo "GCP_BUCKET_NAME=${{ secrets.GCP_BUCKET_NAME }}" > env.yaml
+        echo "API_KEY=${{ secrets.API_KEY }}" >> env.yaml
+        
+        # Write service account key to a separate file
+        echo '${{ secrets.GCP_SA_KEY }}' > sa-key.json
+        
+        # Verify files were created properly (without showing content)
+        echo "Environment file created"
+        ls -la env.yaml
+        echo "Service account key file created"
+        ls -la sa-key.json
+
     - name: Deploy to Cloud Run
       id: deploy
       run: |
         IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}"
         
-        # Format environment variables properly - each on a new line with proper escaping
+        # Deploy with env vars from file and service account from file
         gcloud run deploy ${{ env.SERVICE_NAME }} \
           --image $IMAGE_URI \
           --project ${{ env.PROJECT_ID }} \
@@ -57,9 +72,13 @@ jobs:
           --min-instances=0 \
           --max-instances=5 \
           --timeout=300s \
-          --set-env-vars="GCP_BUCKET_NAME=${{ secrets.GCP_BUCKET_NAME }}" \
-          --set-env-vars="GCP_SA_CREDENTIALS=${{ secrets.GCP_SA_KEY }}" \
-          --set-env-vars="API_KEY=${{ secrets.API_KEY }}"
+          --update-env-vars-file=env.yaml \
+          --update-env-vars GCP_SA_CREDENTIALS="$(cat sa-key.json)"
+
+    - name: Clean up sensitive files
+      if: always()
+      run: |
+        rm -f env.yaml sa-key.json
 
     - name: Health Check
       run: |

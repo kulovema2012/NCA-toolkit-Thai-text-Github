@@ -14,6 +14,7 @@ STORAGE_PATH = "/tmp/"
 gcs_client = None
 
 def initialize_gcp_client():
+    """Initialize Google Cloud Storage client with service account credentials."""
     GCP_SA_CREDENTIALS = os.getenv('GCP_SA_CREDENTIALS')
 
     if not GCP_SA_CREDENTIALS:
@@ -24,50 +25,54 @@ def initialize_gcp_client():
     GCS_SCOPES = ['https://www.googleapis.com/auth/devstorage.full_control']
 
     try:
-        # First try parsing as JSON directly
+        # First, try to load the credentials directly as a JSON object
         try:
+            # Check if the credentials are already a valid JSON string
             credentials_info = json.loads(GCP_SA_CREDENTIALS)
-        except json.JSONDecodeError as json_err:
-            # If that fails, try fixing common issues with the JSON string
-            logger.warning(f"Initial JSON parsing failed: {json_err}. Attempting to fix JSON format...")
+            logger.info("Successfully parsed GCP credentials as JSON")
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse GCP credentials as JSON: {e}")
             
-            # Try to clean up the JSON string - handle potential escaping issues
-            # This handles cases where the JSON might have been double-escaped or has extra quotes
-            cleaned_json = GCP_SA_CREDENTIALS.strip()
+            # Try to write credentials to a temporary file and load from there
+            # This approach handles many formatting issues
+            import tempfile
             
-            # If it starts with a quote and ends with a quote, try removing them
-            if (cleaned_json.startswith('"') and cleaned_json.endswith('"')) or \
-               (cleaned_json.startswith("'") and cleaned_json.endswith("'")):
-                cleaned_json = cleaned_json[1:-1]
-            
-            # Replace escaped quotes with actual quotes
-            cleaned_json = cleaned_json.replace('\\"', '"')
-            
-            # Log the first few characters for debugging (avoid logging the entire credential)
-            safe_prefix = cleaned_json[:20] + "..." if len(cleaned_json) > 20 else cleaned_json
-            logger.info(f"Attempting to parse cleaned JSON: {safe_prefix}")
+            with tempfile.NamedTemporaryFile(mode='w+', delete=False) as temp:
+                temp_path = temp.name
+                temp.write(GCP_SA_CREDENTIALS)
+                temp.flush()
             
             try:
-                credentials_info = json.loads(cleaned_json)
-            except json.JSONDecodeError:
-                # If still failing, try one more approach - sometimes the JSON is stringified multiple times
-                logger.warning("Second attempt failed. Trying alternative approach...")
+                logger.info(f"Attempting to load credentials from temp file: {temp_path}")
+                gcs_credentials = service_account.Credentials.from_service_account_file(
+                    temp_path,
+                    scopes=GCS_SCOPES
+                )
+                # If we get here, we successfully loaded credentials from file
+                os.unlink(temp_path)  # Clean up temp file
+                return storage.Client(credentials=gcs_credentials)
+            except Exception as file_error:
+                logger.error(f"Failed to load credentials from temp file: {file_error}")
+                os.unlink(temp_path)  # Clean up temp file
+                
+                # Last resort: try to fix common JSON formatting issues
+                logger.warning("Attempting to fix JSON format...")
+                cleaned_json = GCP_SA_CREDENTIALS.strip()
+                
+                # If it starts with a quote and ends with a quote, try removing them
+                if (cleaned_json.startswith('"') and cleaned_json.endswith('"')) or \
+                   (cleaned_json.startswith("'") and cleaned_json.endswith("'")):
+                    cleaned_json = cleaned_json[1:-1]
+                
+                # Replace escaped quotes with actual quotes
+                cleaned_json = cleaned_json.replace('\\"', '"')
+                
                 try:
-                    # Try to handle double-stringified JSON
-                    if cleaned_json.startswith('\\"{') or cleaned_json.startswith('"{'):
-                        import re
-                        # Use regex to extract the actual JSON object
-                        match = re.search(r'({.*})', cleaned_json)
-                        if match:
-                            credentials_info = json.loads(match.group(1))
-                        else:
-                            raise ValueError("Could not extract valid JSON from credential string")
-                    else:
-                        raise ValueError("JSON format could not be automatically fixed")
-                except Exception as e:
-                    logger.error(f"All JSON parsing attempts failed: {e}")
-                    logger.error("Please check the format of your GCP_SA_CREDENTIALS environment variable")
-                    logger.error("It should be a valid JSON service account key without extra quotes or escaping")
+                    credentials_info = json.loads(cleaned_json)
+                    logger.info("Successfully parsed cleaned GCP credentials")
+                except Exception:
+                    logger.error("All attempts to parse GCP credentials failed")
+                    logger.error("Please check your GCP_SA_CREDENTIALS environment variable")
                     return None
         
         # Create credentials from the parsed info
