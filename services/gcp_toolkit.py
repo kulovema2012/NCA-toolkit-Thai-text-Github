@@ -24,7 +24,53 @@ def initialize_gcp_client():
     GCS_SCOPES = ['https://www.googleapis.com/auth/devstorage.full_control']
 
     try:
-        credentials_info = json.loads(GCP_SA_CREDENTIALS)
+        # First try parsing as JSON directly
+        try:
+            credentials_info = json.loads(GCP_SA_CREDENTIALS)
+        except json.JSONDecodeError as json_err:
+            # If that fails, try fixing common issues with the JSON string
+            logger.warning(f"Initial JSON parsing failed: {json_err}. Attempting to fix JSON format...")
+            
+            # Try to clean up the JSON string - handle potential escaping issues
+            # This handles cases where the JSON might have been double-escaped or has extra quotes
+            cleaned_json = GCP_SA_CREDENTIALS.strip()
+            
+            # If it starts with a quote and ends with a quote, try removing them
+            if (cleaned_json.startswith('"') and cleaned_json.endswith('"')) or \
+               (cleaned_json.startswith("'") and cleaned_json.endswith("'")):
+                cleaned_json = cleaned_json[1:-1]
+            
+            # Replace escaped quotes with actual quotes
+            cleaned_json = cleaned_json.replace('\\"', '"')
+            
+            # Log the first few characters for debugging (avoid logging the entire credential)
+            safe_prefix = cleaned_json[:20] + "..." if len(cleaned_json) > 20 else cleaned_json
+            logger.info(f"Attempting to parse cleaned JSON: {safe_prefix}")
+            
+            try:
+                credentials_info = json.loads(cleaned_json)
+            except json.JSONDecodeError:
+                # If still failing, try one more approach - sometimes the JSON is stringified multiple times
+                logger.warning("Second attempt failed. Trying alternative approach...")
+                try:
+                    # Try to handle double-stringified JSON
+                    if cleaned_json.startswith('\\"{') or cleaned_json.startswith('"{'):
+                        import re
+                        # Use regex to extract the actual JSON object
+                        match = re.search(r'({.*})', cleaned_json)
+                        if match:
+                            credentials_info = json.loads(match.group(1))
+                        else:
+                            raise ValueError("Could not extract valid JSON from credential string")
+                    else:
+                        raise ValueError("JSON format could not be automatically fixed")
+                except Exception as e:
+                    logger.error(f"All JSON parsing attempts failed: {e}")
+                    logger.error("Please check the format of your GCP_SA_CREDENTIALS environment variable")
+                    logger.error("It should be a valid JSON service account key without extra quotes or escaping")
+                    return None
+        
+        # Create credentials from the parsed info
         gcs_credentials = service_account.Credentials.from_service_account_info(
             credentials_info,
             scopes=GCS_SCOPES
@@ -32,6 +78,12 @@ def initialize_gcp_client():
         return storage.Client(credentials=gcs_credentials)
     except Exception as e:
         logger.error(f"Failed to initialize GCS client: {e}")
+        # Log more details about the credential format to help debugging
+        if GCP_SA_CREDENTIALS:
+            credential_type = type(GCP_SA_CREDENTIALS).__name__
+            credential_length = len(GCP_SA_CREDENTIALS)
+            credential_start = GCP_SA_CREDENTIALS[:10].replace('\n', '').replace('\r', '') + "..."
+            logger.error(f"Credential info - Type: {credential_type}, Length: {credential_length}, Start: {credential_start}")
         return None
 
 # Initialize the GCS client
