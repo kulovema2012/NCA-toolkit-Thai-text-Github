@@ -11,14 +11,16 @@ except ImportError:
 
 from flask import Flask, request
 
-# Load environment variables from .env file
-load_dotenv()
-
 # Retrieve the API key from environment variables
 API_KEY = os.environ.get('API_KEY')
 if not API_KEY:
-    print("WARNING: API_KEY environment variable is not set. Some functionality may be limited.")
-    API_KEY = "test_key"  # Provide a default for testing
+    # Only show warning in development, not in production
+    if os.environ.get('ENVIRONMENT') != 'production':
+        print("WARNING: API_KEY environment variable is not set. Some functionality may be limited.")
+    # In production, we'll use the value from the environment variable without a default
+    # In development, provide a default for testing
+    if os.environ.get('ENVIRONMENT') != 'production':
+        API_KEY = "test123"  # Default for development only
 
 # GCP environment variables
 GCP_SA_CREDENTIALS = os.environ.get('GCP_SA_CREDENTIALS', '')

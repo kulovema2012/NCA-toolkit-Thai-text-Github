@@ -1,9 +1,8 @@
-name: Deploy to Cloud Run
+name: Deploy to Google Cloud Run
 
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT }}
@@ -14,37 +13,38 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
+    permissions:
+      contents: 'read'
+      id-token: 'write'
 
-    - id: auth
-      uses: google-github-actions/auth@v1
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Google Auth
+      id: auth
+      uses: 'google-github-actions/auth@v1'
       with:
-        credentials_json: ${{ secrets.GCP_SA_KEY }}
+        credentials_json: '${{ secrets.GCP_SA_KEY }}'
 
     - name: Set up Cloud SDK
-      uses: google-github-actions/setup-gcloud@v1
+      uses: 'google-github-actions/setup-gcloud@v1'
 
-    - name: Create Artifact Registry repository (if not exists)
-      run: |
-        gcloud artifacts repositories create ${{ env.REPOSITORY }} \
-          --repository-format=docker \
-          --location=${{ env.REGION }} \
-          --project=${{ env.PROJECT_ID }} || true
-
-    - name: Configure Docker for Artifact Registry
+    - name: Configure Docker
       run: |
         gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
 
-    - name: Build and push Docker image
+    - name: Build and Push Container
       run: |
-        IMAGE_URI=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
-        docker build -t $IMAGE_URI .
-        docker push $IMAGE_URI
+        docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }} .
+        docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
 
     - name: Deploy to Cloud Run
+      id: deploy
       run: |
-        IMAGE_URI=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
+        IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}"
+        
+        # Format environment variables properly - each on a new line with proper escaping
         gcloud run deploy ${{ env.SERVICE_NAME }} \
           --image $IMAGE_URI \
           --project ${{ env.PROJECT_ID }} \
@@ -57,7 +57,9 @@ jobs:
           --min-instances=0 \
           --max-instances=5 \
           --timeout=300s \
-          --set-env-vars=GCP_BUCKET_NAME=${{ secrets.GCP_BUCKET_NAME }},GCP_SA_CREDENTIALS=${{ secrets.GCP_SA_KEY }},API_KEY=${{ secrets.API_KEY }}
+          --set-env-vars="GCP_BUCKET_NAME=${{ secrets.GCP_BUCKET_NAME }}" \
+          --set-env-vars="GCP_SA_CREDENTIALS=${{ secrets.GCP_SA_KEY }}" \
+          --set-env-vars="API_KEY=${{ secrets.API_KEY }}"
 
     - name: Health Check
       run: |
@@ -67,34 +69,29 @@ jobs:
         echo "Waiting for service to become healthy..."
         
         for i in {1..10}; do
-          echo "\nAttempt $i/10:"
-          RESPONSE=$(curl -si -X GET "$SERVICE_URL" \
-            -H "Content-Type: application/json" \
-            -H "X-API-Key: ${{ secrets.API_KEY }}" \
-            -w "\nHTTP_STATUS:%{http_code}" \
-            -o response_body.txt)
+          echo "Attempt $i/10:"
           
-          HTTP_STATUS=$(grep 'HTTP_STATUS:' <<< "$RESPONSE" | cut -d':' -f2 | xargs)
+          # Use curl with proper error handling
+          HTTP_STATUS=$(curl -s -o response_body.txt -w "%{http_code}" "$SERVICE_URL" \
+            -H "Content-Type: application/json" \
+            -H "X-API-Key: ${{ secrets.API_KEY }}" || echo "000")
           
           echo "Response Status: $HTTP_STATUS"
           echo "Response Body:"
-          cat response_body.txt
+          cat response_body.txt || echo "No response body"
           
-          case $HTTP_STATUS in
-            200) 
-              echo " Health check passed!"
-              exit 0
-              ;;
-            401) 
-              echo ""
-              ;;
-            502|503|504)
-              echo ""
-              ;;
-            *)
-              echo ""
-              ;;
-          esac
+          if [ "$HTTP_STATUS" = "200" ]; then
+            echo " Health check passed!"
+            exit 0
+          elif [ "$HTTP_STATUS" = "401" ]; then
+            echo ""
+          elif [ "$HTTP_STATUS" = "502" ] || [ "$HTTP_STATUS" = "503" ] || [ "$HTTP_STATUS" = "504" ]; then
+            echo ""
+          elif [ "$HTTP_STATUS" = "000" ]; then
+            echo ""
+          else
+            echo ""
+          fi
           
           sleep $((i*5))
         done
