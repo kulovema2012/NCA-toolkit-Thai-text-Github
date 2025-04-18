@@ -39,26 +39,24 @@ jobs:
         docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }} .
         docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
 
-    - name: Prepare Environment Variables
+    - name: Create Service Account Key File
       run: |
-        # Create a temporary file with all environment variables
+        # Store the service account key in a file
+        echo '${{ secrets.GCP_SA_KEY }}' > sa-key.json
+        
+        # Create environment variables file
         cat > env.yaml << EOL
         GCP_BUCKET_NAME: ${{ secrets.GCP_BUCKET_NAME }}
         API_KEY: ${{ secrets.API_KEY }}
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
         STORAGE_PATH: GCP
+        GCP_SA_CREDENTIALS: $(cat sa-key.json | tr -d '\n' | sed 's/"/\\"/g')
         EOL
         
-        # Create a safe version of the service account key
-        # Base64 encode to avoid any issues with special characters
-        echo '${{ secrets.GCP_SA_KEY }}' | base64 > sa-key.b64
-        
-        # Verify files exist (without showing content)
-        echo "Environment file created:"
+        # Verify files exist
+        echo "Environment file created"
         ls -la env.yaml
-        echo "Service account key file created:"
-        ls -la sa-key.b64
 
     - name: Deploy to Cloud Run
       id: deploy
@@ -81,15 +79,8 @@ jobs:
           --timeout=300s \
           --env-vars-file=env.yaml
         
-        # Add the service account key as a separate environment variable
-        # This uses base64 encoding/decoding to avoid JSON escaping issues
-        gcloud run services update ${{ env.SERVICE_NAME }} \
-          --project ${{ env.PROJECT_ID }} \
-          --region ${{ env.REGION }} \
-          --set-env-vars="GCP_SA_CREDENTIALS=$(cat sa-key.b64 | base64 --decode | sed 's/"/\\"/g' | tr -d '\n')"
-        
         # Clean up temporary files
-        rm -f env.yaml sa-key.b64
+        rm -f env.yaml sa-key.json
 
     - name: Health Check
       run: |

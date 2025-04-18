@@ -22,14 +22,19 @@ def validate_gcp_environment():
         issues.append("GCP_BUCKET_NAME environment variable is not set")
         logger.warning("GCP_BUCKET_NAME environment variable is not set")
     
-    # Check GCP_SA_CREDENTIALS
+    # Check for either GCP_SA_CREDENTIALS or GCP_SA_KEY
     creds = os.getenv('GCP_SA_CREDENTIALS')
-    if not creds:
-        issues.append("GCP_SA_CREDENTIALS environment variable is not set")
-        logger.warning("GCP_SA_CREDENTIALS environment variable is not set")
-    elif len(creds) < 100:  # A valid service account JSON should be larger than this
+    key = os.getenv('GCP_SA_KEY')
+    
+    if not creds and not key:
+        issues.append("Neither GCP_SA_CREDENTIALS nor GCP_SA_KEY environment variable is set")
+        logger.warning("Neither GCP_SA_CREDENTIALS nor GCP_SA_KEY environment variable is set")
+    elif creds and len(creds) < 100:  # A valid service account JSON should be larger than this
         issues.append("GCP_SA_CREDENTIALS appears to be too short to be valid")
         logger.warning("GCP_SA_CREDENTIALS appears to be too short to be valid")
+    elif key and len(key) < 100:  # A valid service account JSON should be larger than this
+        issues.append("GCP_SA_KEY appears to be too short to be valid")
+        logger.warning("GCP_SA_KEY appears to be too short to be valid")
     
     if issues:
         logger.warning("GCP environment validation found issues: %s", issues)
@@ -40,9 +45,14 @@ def validate_gcp_environment():
 
 def initialize_gcp_client():
     """Initialize Google Cloud Storage client with service account credentials."""
+    # Try both environment variable names
     GCP_SA_CREDENTIALS = os.getenv('GCP_SA_CREDENTIALS')
+    GCP_SA_KEY = os.getenv('GCP_SA_KEY')
+    
+    # Use whichever one is available
+    credentials_json = GCP_SA_CREDENTIALS or GCP_SA_KEY
 
-    if not GCP_SA_CREDENTIALS:
+    if not credentials_json:
         logger.warning("GCP credentials not found. Skipping GCS client initialization.")
         return None  # Skip client initialization if credentials are missing
 
@@ -53,7 +63,7 @@ def initialize_gcp_client():
         # First, try to load the credentials directly as a JSON object
         try:
             # Check if the credentials are already a valid JSON string
-            credentials_info = json.loads(GCP_SA_CREDENTIALS)
+            credentials_info = json.loads(credentials_json)
             logger.info("Successfully parsed GCP credentials as JSON")
         except json.JSONDecodeError as e:
             logger.warning(f"Failed to parse GCP credentials as JSON: {e}")
@@ -64,7 +74,7 @@ def initialize_gcp_client():
             
             with tempfile.NamedTemporaryFile(mode='w+', delete=False) as temp:
                 temp_path = temp.name
-                temp.write(GCP_SA_CREDENTIALS)
+                temp.write(credentials_json)
                 temp.flush()
             
             try:
@@ -82,7 +92,7 @@ def initialize_gcp_client():
                 
                 # Last resort: try to fix common JSON formatting issues
                 logger.warning("Attempting to fix JSON format...")
-                cleaned_json = GCP_SA_CREDENTIALS.strip()
+                cleaned_json = credentials_json.strip()
                 
                 # If it starts with a quote and ends with a quote, try removing them
                 if (cleaned_json.startswith('"') and cleaned_json.endswith('"')) or \
@@ -97,7 +107,7 @@ def initialize_gcp_client():
                     logger.info("Successfully parsed cleaned GCP credentials")
                 except Exception:
                     logger.error("All attempts to parse GCP credentials failed")
-                    logger.error("Please check your GCP_SA_CREDENTIALS environment variable")
+                    logger.error("Please check your GCP_SA_CREDENTIALS or GCP_SA_KEY environment variable")
                     return None
         
         # Create credentials from the parsed info
@@ -122,10 +132,10 @@ def initialize_gcp_client():
     except Exception as e:
         logger.error(f"Failed to initialize GCS client: {e}")
         # Log more details about the credential format to help debugging
-        if GCP_SA_CREDENTIALS:
-            credential_type = type(GCP_SA_CREDENTIALS).__name__
-            credential_length = len(GCP_SA_CREDENTIALS)
-            credential_start = GCP_SA_CREDENTIALS[:10].replace('\n', '').replace('\r', '') + "..."
+        if credentials_json:
+            credential_type = type(credentials_json).__name__
+            credential_length = len(credentials_json)
+            credential_start = credentials_json[:10].replace('\n', '').replace('\r', '') + "..."
             logger.error(f"Credential info - Type: {credential_type}, Length: {credential_length}, Start: {credential_start}")
         return None
 
