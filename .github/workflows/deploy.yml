@@ -39,24 +39,26 @@ jobs:
         docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }} .
         docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
 
-    - name: Create Service Account Key File
+    - name: Create Environment Variables File
       run: |
-        # Store the service account key in a file
-        echo '${{ secrets.GCP_SA_KEY }}' > sa-key.json
-        
-        # Create environment variables file
+        # Create environment variables file with standard variables
         cat > env.yaml << EOL
         GCP_BUCKET_NAME: ${{ secrets.GCP_BUCKET_NAME }}
         API_KEY: ${{ secrets.API_KEY }}
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
         STORAGE_PATH: GCP
-        GCP_SA_CREDENTIALS: $(cat sa-key.json | tr -d '\n' | sed 's/"/\\"/g')
         EOL
-        
-        # Verify files exist
-        echo "Environment file created"
-        ls -la env.yaml
+
+        # Append the service account key, explicitly quoted as a YAML string
+        # Process the secret to escape any internal single quotes (' -> '') and remove newlines
+        GCP_SA_KEY_ESCAPED=$(echo '${{ secrets.GCP_SA_KEY }}' | tr -d '\n' | sed "s/'/''/g")
+        echo "GCP_SA_CREDENTIALS: '${GCP_SA_KEY_ESCAPED}'" >> env.yaml
+
+        # Verify file content for debugging
+        echo "--- env.yaml content --- "
+        cat env.yaml
+        echo "--- end of env.yaml content --- "
 
     - name: Deploy to Cloud Run
       id: deploy
@@ -64,7 +66,7 @@ jobs:
         # Set image URI
         IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}"
         
-        # Deploy with all environment variables
+        # Deploy with all environment variables from the YAML file
         gcloud run deploy ${{ env.SERVICE_NAME }} \
           --image $IMAGE_URI \
           --project ${{ env.PROJECT_ID }} \
@@ -80,7 +82,7 @@ jobs:
           --env-vars-file=env.yaml
         
         # Clean up temporary files
-        rm -f env.yaml sa-key.json
+        rm -f env.yaml
 
     - name: Health Check
       run: |
