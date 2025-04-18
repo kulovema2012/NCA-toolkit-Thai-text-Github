@@ -39,12 +39,26 @@ jobs:
         docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }} .
         docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
 
-    - name: Create Service Account Key File
+    - name: Prepare Environment Variables
       run: |
-        # Create a temporary file with the service account key
-        echo '${{ secrets.GCP_SA_KEY }}' > /tmp/sa-key.json
-        # Verify file exists (without showing content)
-        ls -la /tmp/sa-key.json
+        # Create a temporary file with all environment variables
+        cat > env.yaml << EOL
+        GCP_BUCKET_NAME: ${{ secrets.GCP_BUCKET_NAME }}
+        API_KEY: ${{ secrets.API_KEY }}
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
+        STORAGE_PATH: GCP
+        EOL
+        
+        # Create a safe version of the service account key
+        # Base64 encode to avoid any issues with special characters
+        echo '${{ secrets.GCP_SA_KEY }}' | base64 > sa-key.b64
+        
+        # Verify files exist (without showing content)
+        echo "Environment file created:"
+        ls -la env.yaml
+        echo "Service account key file created:"
+        ls -la sa-key.b64
 
     - name: Deploy to Cloud Run
       id: deploy
@@ -52,7 +66,7 @@ jobs:
         # Set image URI
         IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}"
         
-        # Deploy with all environment variables except GCP_SA_CREDENTIALS
+        # Deploy with all environment variables
         gcloud run deploy ${{ env.SERVICE_NAME }} \
           --image $IMAGE_URI \
           --project ${{ env.PROJECT_ID }} \
@@ -65,23 +79,17 @@ jobs:
           --min-instances=0 \
           --max-instances=5 \
           --timeout=300s \
-          --set-env-vars="GCP_BUCKET_NAME=${{ secrets.GCP_BUCKET_NAME }}" \
-          --set-env-vars="API_KEY=${{ secrets.API_KEY }}" \
-          --set-env-vars="OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" \
-          --set-env-vars="REPLICATE_API_TOKEN=${{ secrets.REPLICATE_API_TOKEN }}" \
-          --set-env-vars="STORAGE_PATH=GCP"
-
-    - name: Set GCP Service Account Credentials
-      run: |
-        # Use gcloud beta run services update with --update-secrets instead of env vars
-        # This avoids JSON escaping issues completely
-        gcloud beta run services update ${{ env.SERVICE_NAME }} \
+          --env-vars-file=env.yaml
+        
+        # Add the service account key as a separate environment variable
+        # This uses base64 encoding/decoding to avoid JSON escaping issues
+        gcloud run services update ${{ env.SERVICE_NAME }} \
           --project ${{ env.PROJECT_ID }} \
           --region ${{ env.REGION }} \
-          --update-secrets="GCP_SA_CREDENTIALS=/tmp/sa-key.json:latest"
+          --set-env-vars="GCP_SA_CREDENTIALS=$(cat sa-key.b64 | base64 --decode | sed 's/"/\\"/g' | tr -d '\n')"
         
-        # Clean up the temporary file
-        rm -f /tmp/sa-key.json
+        # Clean up temporary files
+        rm -f env.yaml sa-key.b64
 
     - name: Health Check
       run: |
