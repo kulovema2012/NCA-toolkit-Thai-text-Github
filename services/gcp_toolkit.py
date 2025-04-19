@@ -3,6 +3,7 @@ import json
 import logging
 from google.oauth2 import service_account
 from google.cloud import storage
+from datetime import datetime, timedelta
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -154,7 +155,7 @@ def upload_to_gcs(file_path, bucket_name=GCP_BUCKET_NAME):
         bucket_name: GCS bucket name
         
     Returns:
-        Public URL to the uploaded file
+        Signed URL to the uploaded file with temporary access
     """
     if not gcs_client:
         error_msg = "GCS client is not initialized. Skipping file upload."
@@ -169,10 +170,15 @@ def upload_to_gcs(file_path, bucket_name=GCP_BUCKET_NAME):
     try:
         logger.info(f"Uploading file to Google Cloud Storage: {file_path}")
         bucket = gcs_client.bucket(bucket_name)
-        blob = bucket.blob(os.path.basename(file_path))
+        blob_name = os.path.basename(file_path)
+        blob = bucket.blob(blob_name)
         blob.upload_from_filename(file_path)
-        logger.info(f"File uploaded successfully to GCS: {blob.public_url}")
-        return blob.public_url
+        
+        # Generate a signed URL instead of returning the public URL
+        signed_url = generate_signed_url(blob_name, bucket_name)
+        
+        logger.info(f"File uploaded successfully to GCS with signed URL")
+        return signed_url
     except Exception as e:
         logger.error(f"Failed to upload file to GCS: {e}")
         raise
@@ -187,7 +193,7 @@ def upload_to_gcs_with_path(file_path, bucket_name=GCP_BUCKET_NAME, destination_
         destination_path: Custom path in the bucket (e.g., 'thumbnails/image.jpg')
         
     Returns:
-        Public URL to the uploaded file
+        Signed URL to the uploaded file with temporary access
     """
     if not gcs_client:
         raise ValueError("GCS client is not initialized. Skipping file upload.")
@@ -201,8 +207,74 @@ def upload_to_gcs_with_path(file_path, bucket_name=GCP_BUCKET_NAME, destination_
         blob = bucket.blob(blob_path)
         
         blob.upload_from_filename(file_path)
-        logger.info(f"File uploaded successfully to GCS: {blob.public_url}")
-        return blob.public_url
+        
+        # Generate a signed URL instead of returning the public URL
+        signed_url = generate_signed_url(blob_path, bucket_name)
+        
+        logger.info(f"File uploaded successfully to GCS with signed URL")
+        return signed_url
     except Exception as e:
         logger.error(f"Error uploading file to GCS with custom path: {e}")
         raise
+
+def generate_signed_url(blob_name, bucket_name=GCP_BUCKET_NAME, expiration_minutes=10080):  # Default 7 days
+    """
+    Generate a signed URL for a GCS object that allows temporary access.
+    
+    Args:
+        blob_name: Name of the blob/object in the bucket
+        bucket_name: GCS bucket name
+        expiration_minutes: URL expiration time in minutes (default: 7 days)
+        
+    Returns:
+        Signed URL with temporary access
+    """
+    if not gcs_client:
+        error_msg = "GCS client is not initialized. Cannot generate signed URL."
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+
+    try:
+        logger.info(f"Generating signed URL for: {blob_name}")
+        bucket = gcs_client.bucket(bucket_name)
+        blob = bucket.blob(blob_name)
+        
+        # Generate URL that expires in the specified time
+        url = blob.generate_signed_url(
+            version="v4",
+            expiration=timedelta(minutes=expiration_minutes),
+            method="GET"
+        )
+        
+        logger.info(f"Generated signed URL with {expiration_minutes} minute expiration")
+        return url
+    except Exception as e:
+        logger.error(f"Failed to generate signed URL: {e}")
+        raise
+
+def public_url_to_signed_url(public_url, expiration_minutes=10080):
+    """
+    Convert a public GCS URL to a signed URL.
+    
+    Args:
+        public_url: The public URL of a GCS object
+        expiration_minutes: URL expiration time in minutes (default: 7 days)
+        
+    Returns:
+        Signed URL with temporary access
+    """
+    try:
+        # Extract blob name from public URL
+        # Format: https://storage.googleapis.com/BUCKET_NAME/BLOB_NAME
+        parts = public_url.split('/')
+        if len(parts) < 5 or parts[2] != 'storage.googleapis.com':
+            raise ValueError(f"Invalid GCS public URL format: {public_url}")
+            
+        bucket_name = parts[3]
+        blob_name = '/'.join(parts[4:])
+        
+        return generate_signed_url(blob_name, bucket_name, expiration_minutes)
+    except Exception as e:
+        logger.error(f"Failed to convert public URL to signed URL: {e}")
+        # Return the original URL as fallback
+        return public_url
