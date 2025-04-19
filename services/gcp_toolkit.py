@@ -155,7 +155,7 @@ def upload_to_gcs(file_path, bucket_name=GCP_BUCKET_NAME):
         bucket_name: GCS bucket name
         
     Returns:
-        Signed URL to the uploaded file with temporary access
+        Public URL to the uploaded file
     """
     if not gcs_client:
         error_msg = "GCS client is not initialized. Skipping file upload."
@@ -174,11 +174,9 @@ def upload_to_gcs(file_path, bucket_name=GCP_BUCKET_NAME):
         blob = bucket.blob(blob_name)
         blob.upload_from_filename(file_path)
         
-        # Generate a signed URL instead of returning the public URL
-        signed_url = generate_signed_url(blob_name, bucket_name)
-        
-        logger.info(f"File uploaded successfully to GCS with signed URL")
-        return signed_url
+        # Return the public URL since the bucket is public
+        logger.info(f"File uploaded successfully to GCS: {blob.public_url}")
+        return blob.public_url
     except Exception as e:
         logger.error(f"Failed to upload file to GCS: {e}")
         raise
@@ -193,7 +191,7 @@ def upload_to_gcs_with_path(file_path, bucket_name=GCP_BUCKET_NAME, destination_
         destination_path: Custom path in the bucket (e.g., 'thumbnails/image.jpg')
         
     Returns:
-        Signed URL to the uploaded file with temporary access
+        Public URL to the uploaded file
     """
     if not gcs_client:
         raise ValueError("GCS client is not initialized. Skipping file upload.")
@@ -208,11 +206,9 @@ def upload_to_gcs_with_path(file_path, bucket_name=GCP_BUCKET_NAME, destination_
         
         blob.upload_from_filename(file_path)
         
-        # Generate a signed URL instead of returning the public URL
-        signed_url = generate_signed_url(blob_path, bucket_name)
-        
-        logger.info(f"File uploaded successfully to GCS with signed URL")
-        return signed_url
+        # Return the public URL since the bucket is public
+        logger.info(f"File uploaded successfully to GCS: {blob.public_url}")
+        return blob.public_url
     except Exception as e:
         logger.error(f"Error uploading file to GCS with custom path: {e}")
         raise
