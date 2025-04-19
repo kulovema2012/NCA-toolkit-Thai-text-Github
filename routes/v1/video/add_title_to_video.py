@@ -34,11 +34,18 @@ def add_title_to_video():
         "border_width": 2,
         "padding_top": 200,
         "padding_color": "white",
-        "id": "Optional job ID"
+        "id": "Optional job ID",
+        "metadata": {
+            "thumbnail": true,
+            "filesize": true,
+            "duration": true,
+            "bitrate": true,
+            "encoder": true
+        }
     }
     
     Returns:
-        JSON with URL to the processed video
+        JSON with URL to the processed video and optional metadata
     """
     try:
         data = request.get_json()
@@ -54,6 +61,7 @@ def add_title_to_video():
         padding_top = data.get('padding_top', 200)
         padding_color = data.get('padding_color', 'white')
         job_id = data.get('id', f"title_{uuid.uuid4()}")
+        metadata_request = data.get('metadata', {})
         
         # Validate required parameters
         if not video_url:
@@ -80,7 +88,8 @@ def add_title_to_video():
             border_width=border_width,
             padding_top=padding_top,
             padding_color=padding_color,
-            job_id=job_id
+            job_id=job_id,
+            metadata_request=metadata_request
         )
         
         return jsonify(result)
@@ -138,7 +147,7 @@ def smart_split_thai_text(text, max_chars_per_line=25):
     return lines
 
 def process_add_title(video_url, title_lines, font_name, font_size, font_color, 
-                     border_color, border_width, padding_top, padding_color, job_id):
+                     border_color, border_width, padding_top, padding_color, job_id, metadata_request=None):
     """
     Process the video to add a title with padding.
     
@@ -153,6 +162,7 @@ def process_add_title(video_url, title_lines, font_name, font_size, font_color,
         padding_top: Top padding in pixels
         padding_color: Padding color
         job_id: Job ID
+        metadata_request: Dictionary specifying which metadata to include
         
     Returns:
         Dictionary with result information
@@ -228,19 +238,74 @@ def process_add_title(video_url, title_lines, font_name, font_size, font_color,
         destination_path = f"titled_videos/{os.path.basename(output_video)}"
         video_url = upload_to_gcs_with_path(output_video, destination_path=destination_path)
         
-        # Clean up
-        try:
-            os.remove(input_video)
-            os.remove(output_video)
-            os.rmdir(temp_dir)
-        except:
-            logger.warning(f"Could not clean up all temporary files for job {job_id}")
-        
-        return {
+        # Prepare result
+        result = {
             "id": job_id,
             "status": "success",
             "video_url": video_url
         }
+        
+        # Add metadata if requested
+        if metadata_request:
+            metadata = {}
+            
+            # Generate thumbnail if requested
+            if metadata_request.get('thumbnail'):
+                thumbnail_path = os.path.join(temp_dir, f"thumbnail_{job_id}.jpg")
+                thumbnail_cmd = [
+                    "ffmpeg",
+                    "-i", output_video,
+                    "-ss", "00:00:01",
+                    "-vframes", "1",
+                    "-y",
+                    thumbnail_path
+                ]
+                subprocess.run(thumbnail_cmd, check=True)
+                
+                # Upload thumbnail
+                thumbnail_dest = f"thumbnails/{os.path.basename(thumbnail_path)}"
+                thumbnail_url = upload_to_gcs_with_path(thumbnail_path, destination_path=thumbnail_dest)
+                metadata["thumbnail_url"] = thumbnail_url
+            
+            # Get file size if requested
+            if metadata_request.get('filesize'):
+                metadata["filesize"] = os.path.getsize(output_video)
+            
+            # Get duration, bitrate, and encoder info if requested
+            if metadata_request.get('duration') or metadata_request.get('bitrate') or metadata_request.get('encoder'):
+                media_info_cmd = [
+                    "ffprobe",
+                    "-v", "error",
+                    "-show_entries", "format=duration,bit_rate:stream=codec_name",
+                    "-of", "json",
+                    output_video
+                ]
+                media_info_result = subprocess.run(media_info_cmd, capture_output=True, text=True)
+                media_info = json.loads(media_info_result.stdout)
+                
+                if metadata_request.get('duration') and 'duration' in media_info.get('format', {}):
+                    metadata["duration"] = float(media_info['format']['duration'])
+                
+                if metadata_request.get('bitrate') and 'bit_rate' in media_info.get('format', {}):
+                    metadata["bitrate"] = int(media_info['format']['bit_rate'])
+                
+                if metadata_request.get('encoder') and 'streams' in media_info and len(media_info['streams']) > 0:
+                    metadata["encoder"] = media_info['streams'][0].get('codec_name', 'unknown')
+            
+            # Add metadata to result
+            result["metadata"] = metadata
+        
+        # Clean up
+        try:
+            os.remove(input_video)
+            os.remove(output_video)
+            if metadata_request and metadata_request.get('thumbnail'):
+                os.remove(thumbnail_path)
+            os.rmdir(temp_dir)
+        except Exception as e:
+            logger.warning(f"Could not clean up all temporary files for job {job_id}: {e}")
+        
+        return result
         
     except Exception as e:
         logger.error(f"Error processing video title: {str(e)}")
