@@ -6,11 +6,13 @@ import tempfile
 import uuid
 import subprocess
 import re
+import glob
 from werkzeug.utils import secure_filename
 from pythainlp.tokenize import word_tokenize
 
 from services.gcp_toolkit import upload_to_gcs_with_path
 from services.file_management import download_file
+from services.v1.ffmpeg.ffmpeg_compose import find_thai_font
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -195,6 +197,15 @@ def process_add_title(video_url, title_lines, font_name, font_size, font_color,
         line_height = min(font_size * 1.3, padding_top / (len(title_lines) + 1))
         y_start = max(10, (padding_top - len(title_lines) * line_height) / 2)
         
+        # Find Thai font using the existing function
+        thai_font_path = find_thai_font()
+        if not thai_font_path:
+            logger.warning(f"No Thai font found, using default font specification: {font_name}")
+            font_path = f"/usr/share/fonts/truetype/thai-tlwg/{font_name}.ttf"
+        else:
+            logger.info(f"Using Thai font: {thai_font_path}")
+            font_path = thai_font_path
+        
         # Create drawtext filters for each line
         drawtext_filters = []
         for i, line in enumerate(title_lines):
@@ -203,7 +214,7 @@ def process_add_title(video_url, title_lines, font_name, font_size, font_color,
             
             filter_text = (
                 f"drawtext=text='{escaped_line}':"
-                f"fontfile=/usr/share/fonts/truetype/thai-tlwg/{font_name}.ttf:"
+                f"fontfile={font_path}:"  # No quotes around font path for compatibility
                 f"fontsize={font_size}:"
                 f"fontcolor={font_color}:"
                 f"bordercolor={border_color}:"
@@ -213,8 +224,8 @@ def process_add_title(video_url, title_lines, font_name, font_size, font_color,
             )
             drawtext_filters.append(filter_text)
         
-        # Create the full filter string
-        filter_string = f"scale={width}:{height},pad={width}:{height+padding_top}:0:{padding_top}:color={padding_color}"
+        # Create the full filter string - IMPORTANT: Don't scale the video, just add padding
+        filter_string = f"pad={width}:{height+padding_top}:0:{padding_top}:color={padding_color}"
         for filter_text in drawtext_filters:
             filter_string += f",{filter_text}"
         
