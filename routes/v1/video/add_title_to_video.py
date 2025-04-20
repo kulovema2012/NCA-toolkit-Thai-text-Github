@@ -190,8 +190,16 @@ def process_add_title(video_url, title_lines, font_name, font_size, font_color,
         ffprobe_result = subprocess.run(ffprobe_cmd, capture_output=True, text=True)
         video_info = json.loads(ffprobe_result.stdout)
         
-        width = video_info["streams"][0]["width"]
-        height = video_info["streams"][0]["height"]
+        original_width = video_info["streams"][0]["width"]
+        original_height = video_info["streams"][0]["height"]
+        
+        # We want to maintain the final dimensions at original size (e.g., 1080x1920)
+        # So we need to scale the video down to make room for the padding
+        target_width = original_width
+        target_height = original_height
+        
+        # Calculate the new video height to make room for padding
+        video_height = target_height - padding_top
         
         # Calculate line height and positions
         line_height = min(font_size * 1.3, padding_top / (len(title_lines) + 1))
@@ -224,8 +232,9 @@ def process_add_title(video_url, title_lines, font_name, font_size, font_color,
             )
             drawtext_filters.append(filter_text)
         
-        # Create the full filter string - IMPORTANT: Don't scale the video, just add padding
-        filter_string = f"pad={width}:{height+padding_top}:0:{padding_top}:color={padding_color}"
+        # Create the full filter string - Scale video first, then add padding
+        # This keeps the final dimensions at the original size
+        filter_string = f"scale={target_width}:{video_height},pad={target_width}:{target_height}:0:{padding_top}:color={padding_color}"
         for filter_text in drawtext_filters:
             filter_string += f",{filter_text}"
         
