@@ -100,7 +100,7 @@ def add_title_to_video():
         logger.error(f"Error in add_title_to_video: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-def smart_split_thai_text(text, max_chars_per_line=25):
+def smart_split_thai_text(text, max_chars_per_line=20):
     """
     Intelligently split Thai text into lines using pythainlp for proper word tokenization.
     
@@ -201,9 +201,16 @@ def process_add_title(video_url, title_lines, font_name, font_size, font_color,
         # Calculate the new video height to make room for padding
         video_height = target_height - padding_top
         
-        # Calculate line height and positions
-        line_height = min(font_size * 1.3, padding_top / (len(title_lines) + 1))
-        y_start = max(10, (padding_top - len(title_lines) * line_height) / 2)
+        # Calculate line height and positions for perfect vertical centering
+        total_lines = len(title_lines)
+        # Reduce line height for Thai text to prevent overlapping
+        line_height = min(font_size * 1.1, padding_top / (total_lines + 2))
+        
+        # Calculate the total height of all text lines
+        total_text_height = total_lines * line_height
+        
+        # Calculate starting Y position to center text vertically in the padding area
+        y_start = (padding_top - total_text_height) / 2
         
         # Find Thai font using the existing function
         thai_font_path = find_thai_font()
@@ -214,21 +221,28 @@ def process_add_title(video_url, title_lines, font_name, font_size, font_color,
             logger.info(f"Using Thai font: {thai_font_path}")
             font_path = thai_font_path
         
-        # Create drawtext filters for each line
+        # Create drawtext filters for each line with improved spacing
         drawtext_filters = []
         for i, line in enumerate(title_lines):
             # Escape single quotes for FFmpeg
             escaped_line = line.replace("'", "'\\''")
             
+            # Calculate exact Y position for this line
+            y_pos = y_start + (i * line_height)
+            
             filter_text = (
                 f"drawtext=text='{escaped_line}':"
-                f"fontfile={font_path}:"  # No quotes around font path for compatibility
+                f"fontfile={font_path}:"
                 f"fontsize={font_size}:"
                 f"fontcolor={font_color}:"
                 f"bordercolor={border_color}:"
                 f"borderw={border_width}:"
+                # Add line spacing parameter for better Thai text rendering
+                f"line_spacing=5:"
+                # Ensure text is centered horizontally
                 f"x=(w-text_w)/2:"
-                f"y={int(y_start + i * line_height)}"
+                # Position text precisely
+                f"y={int(y_pos)}"
             )
             drawtext_filters.append(filter_text)
         
