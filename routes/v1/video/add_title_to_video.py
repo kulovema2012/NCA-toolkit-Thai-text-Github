@@ -100,7 +100,7 @@ def add_title_to_video():
         logger.error(f"Error in add_title_to_video: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-def smart_split_thai_text(text, max_chars_per_line=20):
+def smart_split_thai_text(text, max_chars_per_line=30):
     """
     Intelligently split Thai text into lines using pythainlp for proper word tokenization.
     
@@ -203,11 +203,12 @@ def process_add_title(video_url, title_lines, font_name, font_size, font_color,
         
         # Calculate line height and positions for perfect vertical centering
         total_lines = len(title_lines)
-        # Reduce line height for Thai text to prevent overlapping
-        line_height = min(font_size * 1.1, padding_top / (total_lines + 2))
         
-        # Calculate the total height of all text lines
-        total_text_height = total_lines * line_height
+        # Increase line spacing for better readability
+        line_spacing = 15  # Pixels between lines
+        
+        # Calculate the total height of all text lines including spacing
+        total_text_height = (total_lines * font_size) + ((total_lines - 1) * line_spacing)
         
         # Calculate starting Y position to center text vertically in the padding area
         y_start = (padding_top - total_text_height) / 2
@@ -227,8 +228,11 @@ def process_add_title(video_url, title_lines, font_name, font_size, font_color,
             # Escape single quotes for FFmpeg
             escaped_line = line.replace("'", "'\\''")
             
-            # Calculate exact Y position for this line
-            y_pos = y_start + (i * line_height)
+            # Calculate exact Y position for this line with improved spacing
+            y_pos = y_start + (i * (font_size + line_spacing))
+            
+            # Add letter spacing for Thai text to prevent character crowding
+            letter_spacing = 3  # Pixels between characters
             
             filter_text = (
                 f"drawtext=text='{escaped_line}':"
@@ -237,8 +241,8 @@ def process_add_title(video_url, title_lines, font_name, font_size, font_color,
                 f"fontcolor={font_color}:"
                 f"bordercolor={border_color}:"
                 f"borderw={border_width}:"
-                # Add line spacing parameter for better Thai text rendering
-                f"line_spacing=5:"
+                # Add letter spacing for better Thai character separation
+                f"spacing={letter_spacing}:"
                 # Ensure text is centered horizontally
                 f"x=(w-text_w)/2:"
                 # Position text precisely
