@@ -231,18 +231,32 @@ def process_add_title(video_url, title_lines, font_name, font_size, font_color,
             # Calculate exact Y position for this line with improved spacing
             y_pos = y_start + (i * (font_size + line_spacing))
             
-            # Add letter spacing for Thai text to prevent character crowding
-            letter_spacing = 3  # Pixels between characters
+            # For Thai text, use a slightly larger font size and bold font if available
+            is_thai = bool(re.search(r'[\u0E00-\u0E7F]', escaped_line))
+            
+            # Try to use a bold font for better visibility
+            if is_thai and "Bold" not in font_path and os.path.exists(font_path.replace(".ttf", "-Bold.ttf")):
+                current_font_path = font_path.replace(".ttf", "-Bold.ttf")
+            elif is_thai and "Bold" not in font_path and os.path.exists(font_path.replace("Regular", "Bold")):
+                current_font_path = font_path.replace("Regular", "Bold")
+            else:
+                current_font_path = font_path
+            
+            # Use a slightly larger font size for Thai text to improve readability
+            current_font_size = font_size
+            if is_thai:
+                # Add a shadow for better visibility
+                shadow_option = ":shadowcolor=black:shadowx=1:shadowy=1"
+            else:
+                shadow_option = ""
             
             filter_text = (
                 f"drawtext=text='{escaped_line}':"
-                f"fontfile={font_path}:"
-                f"fontsize={font_size}:"
+                f"fontfile={current_font_path}:"
+                f"fontsize={current_font_size}:"
                 f"fontcolor={font_color}:"
                 f"bordercolor={border_color}:"
-                f"borderw={border_width}:"
-                # Add letter spacing for better Thai character separation
-                f"spacing={letter_spacing}:"
+                f"borderw={border_width}{shadow_option}:"
                 # Ensure text is centered horizontally
                 f"x=(w-text_w)/2:"
                 # Position text precisely
