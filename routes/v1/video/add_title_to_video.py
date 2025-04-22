@@ -119,12 +119,49 @@ def smart_split_thai_text(text, max_chars_per_line=30):
     if len(text) <= max_chars_per_line:
         return [text]
     
+    # Special handling for titles with colon format "Title: Subtitle"
+    if ':' in text:
+        parts = text.split(':', 1)  # Split only on the first colon
+        if len(parts) == 2:
+            title_part = parts[0].strip()
+            subtitle_part = parts[1].strip()
+            
+            # If both parts are reasonably sized, return them as separate lines
+            if len(title_part) <= max_chars_per_line and len(subtitle_part) <= max_chars_per_line:
+                return [title_part, subtitle_part]
+            
+            # If title part is short but subtitle is long, keep title as is and split subtitle
+            if len(title_part) <= max_chars_per_line:
+                subtitle_lines = smart_split_thai_text(subtitle_part, max_chars_per_line)
+                return [title_part] + subtitle_lines
+    
     # Check if text is primarily Thai
     is_thai = bool(re.search(r'[\u0E00-\u0E7F]', text))
     
     if is_thai:
         # Use pythainlp to tokenize Thai text into words
         words = word_tokenize(text, engine="newmm")
+        
+        # Special handling to preserve punctuation with the preceding word
+        processed_words = []
+        current_word = ""
+        
+        for word in words:
+            if word in [',', '.', ':', ';', '?', '!', ')', ']', '}', '"', "'"]:
+                # Attach punctuation to the previous word
+                if current_word:
+                    current_word += word
+                else:
+                    processed_words.append(word)
+            else:
+                if current_word:
+                    processed_words.append(current_word)
+                current_word = word
+                
+        if current_word:
+            processed_words.append(current_word)
+            
+        words = processed_words
     else:
         # For non-Thai text, split by spaces
         words = text.split()
@@ -134,8 +171,11 @@ def smart_split_thai_text(text, max_chars_per_line=30):
     
     for word in words:
         # Check if adding this word would exceed the max line length
-        if len(current_line) + len(word) <= max_chars_per_line:
-            current_line += word
+        if len(current_line) + len(word) + (1 if current_line else 0) <= max_chars_per_line:
+            if current_line:
+                current_line += word
+            else:
+                current_line = word
         else:
             # Line would be too long, start a new line
             if current_line:
