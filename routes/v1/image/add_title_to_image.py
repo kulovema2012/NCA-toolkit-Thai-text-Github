@@ -12,7 +12,7 @@ import numpy as np
 from io import BytesIO
 from pythainlp import word_tokenize
 
-from services.gcp_toolkit import upload_file_to_gcs, get_signed_url
+from services.gcp_toolkit import upload_to_gcs_with_path, generate_signed_url
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -65,6 +65,9 @@ def add_title_to_image():
         import uuid
         job_id = str(uuid.uuid4())
         
+        # Clean title text by removing colons and semicolons
+        title = clean_title_text(title)
+        
         # Split title into lines for better display
         from routes.v1.video.add_title_to_video import smart_split_thai_text
         title_lines = smart_split_thai_text(title, max_chars_per_line=30)
@@ -87,6 +90,42 @@ def add_title_to_image():
     except Exception as e:
         logger.error(f"Error in add_title_to_image: {str(e)}")
         return jsonify({"error": str(e)}), 500
+
+def clean_title_text(text):
+    """
+    Clean title text by removing colons and semicolons.
+    
+    Args:
+        text: The title text to clean
+        
+    Returns:
+        Cleaned text without colons or semicolons
+    """
+    # Remove colons and semicolons
+    cleaned_text = text.replace(':', '').replace(';', '')
+    
+    # If the text contains Thai characters, we need to handle it differently
+    if re.search(r'[\u0E00-\u0E7F]', text):
+        # For Thai text with colons or semicolons, we want to split at those points
+        # but not include the punctuation
+        if ':' in text:
+            parts = text.split(':', 1)
+            if len(parts) == 2:
+                title_part = parts[0].strip()
+                subtitle_part = parts[1].strip()
+                # Join with a space instead of the colon
+                cleaned_text = f"{title_part} {subtitle_part}"
+        
+        # Same for semicolons
+        if ';' in cleaned_text:
+            parts = cleaned_text.split(';', 1)
+            if len(parts) == 2:
+                title_part = parts[0].strip()
+                subtitle_part = parts[1].strip()
+                # Join with a space instead of the semicolon
+                cleaned_text = f"{title_part} {subtitle_part}"
+    
+    return cleaned_text
 
 def download_image(url, local_path=None):
     """
@@ -217,13 +256,14 @@ def process_add_title_to_image(image_url, title_lines, font_size, font_color,
         new_img.save(output_image_path, quality=95)
         
         # Upload to GCS
-        bucket_name = os.environ.get('GCS_BUCKET_NAME', 'nca-toolkit-thai-text-bucket')
+        bucket_name = os.environ.get('GCP_BUCKET_NAME', 'nca-toolkit-thai-text-bucket')
         output_blob_name = f"{job_id}_titled_image.jpg"
         
-        upload_file_to_gcs(bucket_name, output_blob_name, output_image_path)
+        # Use the correct GCP toolkit functions
+        upload_to_gcs_with_path(output_image_path, bucket_name, output_blob_name)
         
         # Get signed URL
-        signed_url = get_signed_url(bucket_name, output_blob_name)
+        signed_url = generate_signed_url(output_blob_name, bucket_name)
         
         # Prepare result
         result = {
