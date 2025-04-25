@@ -35,7 +35,8 @@ def add_title_to_image():
         "border_color": "#000000",
         "border_width": 2,
         "padding_bottom": 180,
-        "padding_color": "#fa901e"
+        "padding_color": "#fa901e",
+        "font_name": "Sarabun-Regular.ttf"  # Optional: specify a Thai font
     }
     
     Returns:
@@ -60,6 +61,7 @@ def add_title_to_image():
         border_width = data.get('border_width', 2)
         padding_bottom = data.get('padding_bottom', 180)
         padding_color = data.get('padding_color', '#fa901e')
+        font_name = data.get('font_name')  # Optional font name
         
         # Generate a unique job ID
         import uuid
@@ -82,7 +84,8 @@ def add_title_to_image():
             border_width=border_width,
             padding_bottom=padding_bottom,
             padding_color=padding_color,
-            job_id=job_id
+            job_id=job_id,
+            font_name=font_name  # Pass the font name to the processing function
         )
         
         return jsonify(result)
@@ -148,16 +151,47 @@ def download_image(url, local_path=None):
         
     return img
 
-def find_thai_font(font_size=64):
+def find_thai_font(font_size=64, font_name=None):
     """
     Find a suitable sans-serif font for Thai text.
     
     Args:
         font_size: Font size
+        font_name: Optional specific font name to use
         
     Returns:
         PIL ImageFont object
     """
+    # Check for fonts in the project's fonts directory first
+    project_fonts = [
+        # Prioritize Sarabun (modern Thai sans-serif)
+        os.path.join('fonts', 'Sarabun-Regular.ttf'),
+        os.path.join('fonts', 'Sarabun-Bold.ttf'),
+        os.path.join('fonts', 'Sarabun-Medium.ttf'),
+        # Then Noto Sans Thai (excellent Thai support)
+        os.path.join('fonts', 'NotoSansThai-Regular.ttf'),
+        os.path.join('fonts', 'NotoSansThai-Bold.ttf'),
+        os.path.join('fonts', 'NotoSansThai-Medium.ttf')
+    ]
+    
+    # If a specific font name is provided, try to use it first
+    if font_name:
+        specific_font = os.path.join('fonts', font_name)
+        if os.path.exists(specific_font):
+            try:
+                return ImageFont.truetype(specific_font, font_size)
+            except Exception as e:
+                logger.warning(f"Could not load specified font {specific_font}: {str(e)}")
+    
+    # Try project fonts first
+    for path in project_fonts:
+        if os.path.exists(path):
+            try:
+                logger.info(f"Loading Thai font: {path}")
+                return ImageFont.truetype(path, font_size)
+            except Exception as e:
+                logger.warning(f"Could not load font {path}: {str(e)}")
+    
     # Try common Thai sans-serif font paths (prioritizing sans-serif fonts)
     possible_paths = [
         # Sans-serif Thai fonts
@@ -198,7 +232,7 @@ def find_thai_font(font_size=64):
     return ImageFont.load_default()
 
 def process_add_title_to_image(image_url, title_lines, font_size, font_color, 
-                              border_color, border_width, padding_bottom, padding_color, job_id):
+                              border_color, border_width, padding_bottom, padding_color, job_id, font_name=None):
     """
     Process the image to add a title with padding.
     
@@ -212,6 +246,7 @@ def process_add_title_to_image(image_url, title_lines, font_size, font_color,
         padding_bottom: Bottom padding in pixels
         padding_color: Padding color
         job_id: Job ID
+        font_name: Optional font name
         
     Returns:
         Dictionary with result information
@@ -229,7 +264,7 @@ def process_add_title_to_image(image_url, title_lines, font_size, font_color,
         
         # Ensure padding is sufficient for text
         # Calculate minimum required padding based on text content
-        font = find_thai_font(font_size)
+        font = find_thai_font(font_size, font_name)
         
         # Calculate total text height with spacing
         total_lines = len(title_lines)
@@ -274,7 +309,7 @@ def process_add_title_to_image(image_url, title_lines, font_size, font_color,
             scale_factor = (original_width * 0.9) / max_text_width
             new_font_size = int(font_size * scale_factor)
             logger.info(f"Reduced font size from {font_size} to {new_font_size} to fit text width")
-            font = find_thai_font(new_font_size)
+            font = find_thai_font(new_font_size, font_name)
             # Recalculate line spacing with new font size
             line_spacing = int(new_font_size * 0.3)
         
