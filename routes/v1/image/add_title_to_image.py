@@ -284,18 +284,31 @@ def process_add_title_to_image(image_url, title_lines, font_size, font_color,
             padding_bottom = min_required_padding
             logger.info(f"Increased padding to {padding_bottom}px to fit text properly")
         
-        # Create a new image with padding at the bottom
-        new_height = original_height + padding_bottom
-        new_img = Image.new('RGB', (original_width, new_height), color=padding_color)
+        # Calculate the ratio to resize the original image to make room for the title
+        # while maintaining the original dimensions
+        new_image_height = original_height - padding_bottom
+        if new_image_height <= 0:
+            # If padding would take up entire image, reduce padding to half the image height
+            padding_bottom = original_height // 2
+            new_image_height = original_height - padding_bottom
+            logger.warning(f"Padding was too large, reduced to {padding_bottom}px")
         
-        # Paste the original image at the top
-        new_img.paste(img, (0, 0))
+        # Resize the original image to make room for the title
+        resize_ratio = new_image_height / original_height
+        new_image_width = int(original_width * resize_ratio)
+        resized_img = img.resize((new_image_width, new_image_height), Image.LANCZOS)
+        
+        # Create a new image with the original dimensions
+        new_img = Image.new('RGB', (original_width, original_height), color=padding_color)
+        
+        # Paste the resized original image at the top
+        new_img.paste(resized_img, (0, 0))
         
         # Create a drawing context
         draw = ImageDraw.Draw(new_img)
         
         # Calculate starting Y position to center text vertically in the padding area with extra space
-        padding_start_y = original_height
+        padding_start_y = new_image_height
         y_start = padding_start_y + extra_padding
         
         # Calculate maximum text width to ensure it fits within the image
@@ -357,13 +370,21 @@ def process_add_title_to_image(image_url, title_lines, font_size, font_color,
                 },
                 "output": {
                     "width": original_width,
-                    "height": new_height
+                    "height": original_height  # Now matches original height
                 }
             }
         }
         
+        # Clean up temporary files
+        try:
+            os.remove(input_image_path)
+            os.remove(output_image_path)
+            os.rmdir(temp_dir)
+        except Exception as e:
+            logger.warning(f"Error cleaning up temporary files: {str(e)}")
+        
         return result
         
     except Exception as e:
-        logger.error(f"Error processing image title: {str(e)}")
-        raise
+        logger.error(f"Error in process_add_title_to_image: {str(e)}")
+        raise e
