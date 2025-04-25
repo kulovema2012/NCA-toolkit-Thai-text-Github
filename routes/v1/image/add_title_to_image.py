@@ -150,7 +150,7 @@ def download_image(url, local_path=None):
 
 def find_thai_font(font_size=64):
     """
-    Find a suitable font for Thai text.
+    Find a suitable sans-serif font for Thai text.
     
     Args:
         font_size: Font size
@@ -158,13 +158,33 @@ def find_thai_font(font_size=64):
     Returns:
         PIL ImageFont object
     """
-    # Try common Thai font paths
+    # Try common Thai sans-serif font paths (prioritizing sans-serif fonts)
     possible_paths = [
+        # Sans-serif Thai fonts
+        "/usr/share/fonts/truetype/thai-tlwg/Garuda.ttf",
+        "/usr/share/fonts/truetype/thai-tlwg/Garuda-Bold.ttf",
+        "/usr/share/fonts/custom/Garuda.ttf",
+        "/usr/share/fonts/custom/Garuda-Bold.ttf",
+        "/usr/share/fonts/truetype/thai-tlwg/THSarabunNew.ttf",
+        "/usr/share/fonts/truetype/thai-tlwg/THSarabunNew-Bold.ttf",
+        "/usr/share/fonts/custom/THSarabunNew.ttf",
+        "/usr/share/fonts/custom/THSarabunNew-Bold.ttf",
+        # Fallback to other Thai fonts
+        "/usr/share/fonts/truetype/thai-tlwg/Sarabun.ttf",
         "/usr/share/fonts/truetype/thai-tlwg/Sarabun-Bold.ttf",
+        "/usr/share/fonts/custom/Sarabun.ttf",
         "/usr/share/fonts/custom/Sarabun-Bold.ttf",
-        "/usr/share/fonts/truetype/tlwg/Sarabun-Bold.ttf",
+        # Windows paths
+        "C:/Windows/Fonts/Garuda.ttf",
+        "C:/Windows/Fonts/Garuda-Bold.ttf",
+        "C:/Windows/Fonts/THSarabunNew.ttf",
+        "C:/Windows/Fonts/THSarabunNew-Bold.ttf",
+        "C:/Windows/Fonts/Sarabun.ttf",
         "C:/Windows/Fonts/Sarabun-Bold.ttf",
-        "/System/Library/Fonts/Sarabun-Bold.ttf"
+        # Mac paths
+        "/System/Library/Fonts/Garuda.ttf",
+        "/System/Library/Fonts/THSarabunNew.ttf",
+        "/System/Library/Fonts/Sarabun.ttf"
     ]
     
     for path in possible_paths:
@@ -207,6 +227,28 @@ def process_add_title_to_image(image_url, title_lines, font_size, font_color,
         # Get image dimensions
         original_width, original_height = img.size
         
+        # Ensure padding is sufficient for text
+        # Calculate minimum required padding based on text content
+        font = find_thai_font(font_size)
+        
+        # Calculate total text height with spacing
+        total_lines = len(title_lines)
+        line_spacing = int(font_size * 0.3)  # Adjust line spacing to 30% of font size
+        
+        # Calculate the total height of all text lines including spacing
+        total_text_height = (total_lines * font_size) + ((total_lines - 1) * line_spacing)
+        
+        # Add extra padding above and below text (50% of font size)
+        extra_padding = int(font_size * 0.5)
+        
+        # Calculate minimum required padding
+        min_required_padding = total_text_height + (extra_padding * 2)
+        
+        # If requested padding is less than required, increase it
+        if padding_bottom < min_required_padding:
+            padding_bottom = min_required_padding
+            logger.info(f"Increased padding to {padding_bottom}px to fit text properly")
+        
         # Create a new image with padding at the bottom
         new_height = original_height + padding_bottom
         new_img = Image.new('RGB', (original_width, new_height), color=padding_color)
@@ -214,22 +256,27 @@ def process_add_title_to_image(image_url, title_lines, font_size, font_color,
         # Paste the original image at the top
         new_img.paste(img, (0, 0))
         
-        # Find a suitable font
-        font = find_thai_font(font_size)
-        
         # Create a drawing context
         draw = ImageDraw.Draw(new_img)
         
-        # Calculate line height and positions for perfect vertical centering
-        total_lines = len(title_lines)
-        line_spacing = 15  # Pixels between lines
-        
-        # Calculate the total height of all text lines including spacing
-        total_text_height = (total_lines * font_size) + ((total_lines - 1) * line_spacing)
-        
-        # Calculate starting Y position to center text vertically in the padding area
+        # Calculate starting Y position to center text vertically in the padding area with extra space
         padding_start_y = original_height
-        y_start = padding_start_y + (padding_bottom - total_text_height) / 2
+        y_start = padding_start_y + extra_padding
+        
+        # Calculate maximum text width to ensure it fits within the image
+        max_text_width = 0
+        for line in title_lines:
+            text_width = draw.textlength(line, font=font)
+            max_text_width = max(max_text_width, text_width)
+        
+        # If text is too wide, reduce font size
+        if max_text_width > (original_width * 0.9):  # Allow 90% of image width
+            scale_factor = (original_width * 0.9) / max_text_width
+            new_font_size = int(font_size * scale_factor)
+            logger.info(f"Reduced font size from {font_size} to {new_font_size} to fit text width")
+            font = find_thai_font(new_font_size)
+            # Recalculate line spacing with new font size
+            line_spacing = int(new_font_size * 0.3)
         
         # Draw each line of text
         for i, line in enumerate(title_lines):
@@ -262,12 +309,12 @@ def process_add_title_to_image(image_url, title_lines, font_size, font_color,
         # Use the correct GCP toolkit functions
         upload_to_gcs_with_path(output_image_path, bucket_name, output_blob_name)
         
-        # Get signed URL
-        signed_url = generate_signed_url(output_blob_name, bucket_name)
+        # Create public URL instead of signed URL
+        public_url = f"https://storage.googleapis.com/{bucket_name}/{output_blob_name}"
         
         # Prepare result
         result = {
-            "url": signed_url,
+            "url": public_url,
             "dimensions": {
                 "original": {
                     "width": original_width,
