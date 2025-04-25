@@ -294,9 +294,8 @@ def process_add_title_to_image(image_url, title_lines, font_size, font_color,
             logger.warning(f"Padding was too large, reduced to {padding_bottom}px")
         
         # Resize the original image to make room for the title
-        resize_ratio = new_image_height / original_height
-        new_image_width = int(original_width * resize_ratio)
-        resized_img = img.resize((new_image_width, new_image_height), Image.LANCZOS)
+        # Keep the original width (no side padding)
+        resized_img = img.resize((original_width, new_image_height), Image.LANCZOS)
         
         # Create a new image with the original dimensions
         new_img = Image.new('RGB', (original_width, original_height), color=padding_color)
