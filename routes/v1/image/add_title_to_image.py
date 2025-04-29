@@ -14,8 +14,8 @@ from pythainlp import word_tokenize
 
 from services.gcp_toolkit import upload_to_gcs_with_path, generate_signed_url
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
+# Set up logging with more detailed format
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Create blueprint
@@ -36,20 +36,31 @@ def add_title_to_image():
         "border_width": 2,
         "padding_bottom": 180,
         "padding_color": "#fa901e",
-        "font_name": "Sarabun-Regular.ttf"  # Optional: specify a Thai font
+        "font_name": "Sarabun-Regular.ttf",  # Optional: specify a Thai font
+        "text_align": "center",              # Optional: text alignment (left, center, right)
+        "max_lines": 3,                      # Optional: maximum number of lines to display
+        "highlight_words": ["word1", "word2"],  # Optional: words to highlight
+        "highlight_color": "#ffff00",        # Optional: color for highlighted words
+        "auto_highlight": true,              # Optional: automatically highlight important words
+        "highlight_count": 2                 # Optional: number of words to auto-highlight
     }
     
     Returns:
         JSON with URL of the processed image and metadata
     """
     try:
+        logger.info("[DEBUG] Starting add_title_to_image endpoint processing")
+        
         # Get request data
         data = request.get_json()
+        logger.info(f"[DEBUG] Received request data: {json.dumps(data, ensure_ascii=False)}")
         
         # Check required parameters
         if 'image_url' not in data:
+            logger.warning("[DEBUG] Missing required parameter: image_url")
             return jsonify({"error": "Missing required parameter: image_url"}), 400
         if 'title' not in data:
+            logger.warning("[DEBUG] Missing required parameter: title")
             return jsonify({"error": "Missing required parameter: title"}), 400
             
         # Get parameters with defaults
@@ -62,19 +73,46 @@ def add_title_to_image():
         padding_bottom = data.get('padding_bottom', 180)
         padding_color = data.get('padding_color', '#fa901e')
         font_name = data.get('font_name')  # Optional font name
+        text_align = data.get('text_align', 'center')  # Default to center alignment
+        max_lines = data.get('max_lines', 3)  # Default to 3 lines maximum
+        highlight_words = data.get('highlight_words', [])  # Words to highlight
+        highlight_color = data.get('highlight_color', '#ffff00')  # Highlight color
+        auto_highlight = data.get('auto_highlight', False)  # Auto-highlight important words
+        highlight_count = data.get('highlight_count', 2)  # Number of words to auto-highlight
+        
+        logger.info(f"[DEBUG] Processing parameters - Font: {font_name}, Align: {text_align}, Max Lines: {max_lines}")
+        logger.info(f"[DEBUG] Title text: {title}")
         
         # Generate a unique job ID
         import uuid
         job_id = str(uuid.uuid4())
+        logger.info(f"[DEBUG] Generated job ID: {job_id}")
         
         # Clean title text by removing colons and semicolons
         title = clean_title_text(title)
+        logger.info(f"[DEBUG] Cleaned title: {title}")
         
         # Split title into lines for better display
         from routes.v1.video.add_title_to_video import smart_split_thai_text
         title_lines = smart_split_thai_text(title, max_chars_per_line=30)
+        logger.info(f"[DEBUG] Split title into {len(title_lines)} lines: {title_lines}")
+        
+        # Limit to max_lines if specified
+        if max_lines > 0 and len(title_lines) > max_lines:
+            logger.info(f"[DEBUG] Limiting title from {len(title_lines)} to {max_lines} lines")
+            title_lines = title_lines[:max_lines]
+        
+        # Auto-highlight important words if requested
+        if auto_highlight:
+            logger.info(f"[DEBUG] Auto-highlighting enabled, looking for {highlight_count} important words")
+            auto_highlight_words = find_important_words(title, highlight_count)
+            logger.info(f"[DEBUG] Auto-highlighted words: {auto_highlight_words}")
+            # Combine with manually specified highlight words
+            highlight_words = list(set(highlight_words + auto_highlight_words))
+            logger.info(f"[DEBUG] Final highlight words: {highlight_words}")
         
         # Process the image
+        logger.info("[DEBUG] Starting image processing")
         result = process_add_title_to_image(
             image_url=image_url,
             title_lines=title_lines,
@@ -85,13 +123,17 @@ def add_title_to_image():
             padding_bottom=padding_bottom,
             padding_color=padding_color,
             job_id=job_id,
-            font_name=font_name  # Pass the font name to the processing function
+            font_name=font_name,
+            text_align=text_align,
+            highlight_words=highlight_words,
+            highlight_color=highlight_color
         )
         
+        logger.info(f"[DEBUG] Image processing completed, result URL: {result.get('url', 'No URL')}")
         return jsonify(result)
         
     except Exception as e:
-        logger.error(f"Error in add_title_to_image: {str(e)}")
+        logger.error(f"[DEBUG] Error in add_title_to_image: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 def clean_title_text(text):
@@ -231,8 +273,126 @@ def find_thai_font(font_size=64, font_name=None):
     # Fallback to default font
     return ImageFont.load_default()
 
+def find_important_words(text, count):
+    """
+    Find the most important words in the text, focusing on quality over quantity.
+    Ensures we highlight words that are closely related or appear near each other.
+    
+    Args:
+        text: The text to analyze
+        count: The maximum number of important words to find
+        
+    Returns:
+        List of important words (limited to prevent overwhelming)
+    """
+    logger.info(f"[DEBUG] Finding important words in text: '{text}', max count: {count}")
+    
+    # Tokenize the text into words
+    words = word_tokenize(text, engine='newmm')
+    logger.info(f"[DEBUG] Tokenized into {len(words)} words: {words}")
+    
+    # Remove common stop words (expanded list)
+    stop_words = [
+        'และ', 'หรือ', 'ของ', 'ใน', 'ที่', 'เป็น', 'ไม่', 'มี', 'ได้', 'จะ', 
+        'กับ', 'จาก', 'โดย', 'ถึง', 'แต่', 'ก็', 'เพื่อ', 'ต่อ', 'กว่า', 'เมื่อ',
+        'ให้', 'แล้ว', 'ด้วย', 'อยู่', 'อย่าง', 'ไป', 'มา', 'ยัง', 'คือ', 'นี้',
+        'นั้น', 'ๆ', 'นะ', 'ครับ', 'ค่ะ', 'น่า', 'ช่วย', 'เลย', 'พอ', 'ทำ'
+    ]
+    filtered_words = [word for word in words if word not in stop_words and len(word) > 1]
+    logger.info(f"[DEBUG] After stop word removal: {len(filtered_words)} words: {filtered_words}")
+    
+    # Create a list of word positions to track where each word appears in the text
+    word_positions = {}
+    for i, word in enumerate(words):
+        if word in filtered_words:
+            if word not in word_positions:
+                word_positions[word] = []
+            word_positions[word].append(i)
+    
+    # Count word frequencies
+    word_freq = {}
+    for word in filtered_words:
+        if word in word_freq:
+            word_freq[word] += 1
+        else:
+            word_freq[word] = 1
+    logger.info(f"[DEBUG] Word frequencies: {word_freq}")
+    
+    # Score words based on frequency and length
+    word_scores = {}
+    for word, freq in word_freq.items():
+        # Prioritize words that are:
+        # 1. Used multiple times (frequency)
+        # 2. Longer (typically more meaningful in Thai)
+        # 3. Not too short (at least 2 characters)
+        if len(word) >= 2:
+            word_scores[word] = freq * (0.5 + (min(len(word), 10) / 10))
+    
+    # Sort words by score
+    sorted_words = sorted(word_scores.items(), key=lambda x: x[1], reverse=True)
+    logger.info(f"[DEBUG] Words sorted by score: {sorted_words}")
+    
+    # Limit the number of highlighted words to prevent overwhelming
+    max_highlights = min(count, 2)  # Never highlight more than 2 words by default
+    
+    # If we have a very short text, highlight even fewer words
+    if len(filtered_words) < 10:
+        max_highlights = min(max_highlights, 1)  # For short text, highlight at most 1 word
+    logger.info(f"[DEBUG] Max highlights set to: {max_highlights}")
+    
+    # Get the top-scoring words as candidates
+    candidate_words = [word for word, score in sorted_words[:max_highlights * 2]]  # Get more candidates than needed
+    logger.info(f"[DEBUG] Candidate words: {candidate_words}")
+    
+    # If we have more than one word to highlight, ensure they are closely related
+    final_words = []
+    if len(candidate_words) > 0:
+        # Start with the highest scoring word
+        final_words.append(candidate_words[0])
+        logger.info(f"[DEBUG] Selected first word: {candidate_words[0]}")
+        
+        # If we need more words and have candidates
+        if max_highlights > 1 and len(candidate_words) > 1:
+            # Find words that are close to the first selected word
+            first_word = candidate_words[0]
+            first_positions = word_positions.get(first_word, [])
+            logger.info(f"[DEBUG] First word '{first_word}' positions: {first_positions}")
+            
+            # Calculate proximity scores for remaining candidates
+            proximity_scores = {}
+            for word in candidate_words[1:]:
+                if word in word_positions:
+                    # Find the minimum distance between this word and the first word
+                    min_distance = float('inf')
+                    for pos1 in first_positions:
+                        for pos2 in word_positions[word]:
+                            distance = abs(pos1 - pos2)
+                            min_distance = min(min_distance, distance)
+                    
+                    # Score is inverse of distance (closer = higher score)
+                    # but also consider the original importance score
+                    original_score = word_scores[word]
+                    if min_distance <= 5:  # Words are close (within 5 tokens)
+                        proximity_scores[word] = original_score * (1 + (5 - min_distance) * 0.2)
+                    else:
+                        proximity_scores[word] = original_score * 0.5  # Penalize distant words
+                    logger.info(f"[DEBUG] Word '{word}' min distance: {min_distance}, proximity score: {proximity_scores[word]}")
+            
+            # Sort by proximity score
+            proximity_sorted = sorted(proximity_scores.items(), key=lambda x: x[1], reverse=True)
+            logger.info(f"[DEBUG] Words sorted by proximity: {proximity_sorted}")
+            
+            # Add the closest high-scoring word
+            if proximity_sorted:
+                final_words.append(proximity_sorted[0][0])
+                logger.info(f"[DEBUG] Added second word based on proximity: {proximity_sorted[0][0]}")
+    
+    logger.info(f"[DEBUG] Final selected words to highlight: {final_words}")
+    return final_words
+
 def process_add_title_to_image(image_url, title_lines, font_size, font_color, 
-                              border_color, border_width, padding_bottom, padding_color, job_id, font_name=None):
+                              border_color, border_width, padding_bottom, padding_color, job_id, font_name=None,
+                              text_align='center', highlight_words=[], highlight_color='#ffff00'):
     """
     Process the image to add a title with padding.
     
@@ -247,24 +407,38 @@ def process_add_title_to_image(image_url, title_lines, font_size, font_color,
         padding_color: Padding color
         job_id: Job ID
         font_name: Optional font name
+        text_align: Text alignment (left, center, right)
+        highlight_words: Words to highlight
+        highlight_color: Color for highlighted words
         
     Returns:
         Dictionary with result information
     """
     try:
+        logger.info(f"[DEBUG] Starting image processing with job_id: {job_id}")
+        logger.info(f"[DEBUG] Image URL: {image_url}")
+        logger.info(f"[DEBUG] Title lines: {title_lines}")
+        logger.info(f"[DEBUG] Font settings: size={font_size}, color={font_color}, name={font_name}")
+        logger.info(f"[DEBUG] Text alignment: {text_align}")
+        logger.info(f"[DEBUG] Highlight settings: words={highlight_words}, color={highlight_color}")
+        
         # Create temporary directory
         temp_dir = tempfile.mkdtemp()
+        logger.info(f"[DEBUG] Created temp directory: {temp_dir}")
         
         # Download the image
         input_image_path = os.path.join(temp_dir, f"input_{job_id}.jpg")
         img = download_image(image_url, input_image_path)
+        logger.info(f"[DEBUG] Downloaded image to: {input_image_path}")
         
         # Get image dimensions
         original_width, original_height = img.size
+        logger.info(f"[DEBUG] Original image dimensions: {original_width}x{original_height}")
         
         # Ensure padding is sufficient for text
         # Calculate minimum required padding based on text content
         font = find_thai_font(font_size, font_name)
+        logger.info(f"[DEBUG] Selected font: {font}")
         
         # Calculate total text height with spacing
         total_lines = len(title_lines)
@@ -278,11 +452,12 @@ def process_add_title_to_image(image_url, title_lines, font_size, font_color,
         
         # Calculate minimum required padding
         min_required_padding = total_text_height + (extra_padding * 2)
+        logger.info(f"[DEBUG] Calculated min required padding: {min_required_padding}px")
         
         # If requested padding is less than required, increase it
         if padding_bottom < min_required_padding:
             padding_bottom = min_required_padding
-            logger.info(f"Increased padding to {padding_bottom}px to fit text properly")
+            logger.info(f"[DEBUG] Increased padding to {padding_bottom}px to fit text properly")
         
         # Calculate the ratio to resize the original image to make room for the title
         # while maintaining the original dimensions
@@ -291,14 +466,16 @@ def process_add_title_to_image(image_url, title_lines, font_size, font_color,
             # If padding would take up entire image, reduce padding to half the image height
             padding_bottom = original_height // 2
             new_image_height = original_height - padding_bottom
-            logger.warning(f"Padding was too large, reduced to {padding_bottom}px")
+            logger.warning(f"[DEBUG] Padding was too large, reduced to {padding_bottom}px")
         
         # Resize the original image to make room for the title
         # Keep the original width (no side padding)
         resized_img = img.resize((original_width, new_image_height), Image.LANCZOS)
+        logger.info(f"[DEBUG] Resized image to: {original_width}x{new_image_height}")
         
         # Create a new image with the original dimensions
         new_img = Image.new('RGB', (original_width, original_height), color=padding_color)
+        logger.info(f"[DEBUG] Created new image with dimensions: {original_width}x{original_height}")
         
         # Paste the resized original image at the top
         new_img.paste(resized_img, (0, 0))
@@ -309,30 +486,46 @@ def process_add_title_to_image(image_url, title_lines, font_size, font_color,
         # Calculate starting Y position to center text vertically in the padding area with extra space
         padding_start_y = new_image_height
         y_start = padding_start_y + extra_padding
+        logger.info(f"[DEBUG] Text starting Y position: {y_start}")
         
         # Calculate maximum text width to ensure it fits within the image
         max_text_width = 0
         for line in title_lines:
             text_width = draw.textlength(line, font=font)
             max_text_width = max(max_text_width, text_width)
+        logger.info(f"[DEBUG] Maximum text width: {max_text_width}px")
         
         # If text is too wide, reduce font size
         if max_text_width > (original_width * 0.9):  # Allow 90% of image width
             scale_factor = (original_width * 0.9) / max_text_width
             new_font_size = int(font_size * scale_factor)
-            logger.info(f"Reduced font size from {font_size} to {new_font_size} to fit text width")
+            logger.info(f"[DEBUG] Reduced font size from {font_size} to {new_font_size} to fit text width")
             font = find_thai_font(new_font_size, font_name)
             # Recalculate line spacing with new font size
             line_spacing = int(new_font_size * 0.3)
+        
+        # Set margins for text alignment
+        left_margin = 30  # Left margin for left-aligned text
+        right_margin = 30  # Right margin for right-aligned text
         
         # Draw each line of text
         for i, line in enumerate(title_lines):
             # Calculate exact Y position for this line with improved spacing
             y_pos = y_start + (i * (font_size + line_spacing))
             
-            # Calculate text width to center horizontally
+            # Calculate text position based on alignment
             text_width = draw.textlength(line, font=font)
-            x_pos = (original_width - text_width) / 2
+            if text_align == 'center':
+                x_pos = (original_width - text_width) / 2
+            elif text_align == 'left':
+                x_pos = left_margin
+            elif text_align == 'right':
+                x_pos = original_width - text_width - right_margin
+            else:
+                logger.warning(f"[DEBUG] Unknown text alignment: {text_align}. Defaulting to center.")
+                x_pos = (original_width - text_width) / 2
+            
+            logger.info(f"[DEBUG] Drawing line {i+1}: '{line}' at position ({x_pos}, {y_pos})")
             
             # Draw text border if specified
             if border_width > 0:
@@ -342,22 +535,64 @@ def process_add_title_to_image(image_url, title_lines, font_size, font_color,
                             draw.text((x_pos + offset_x, y_pos + offset_y), line, 
                                      font=font, fill=border_color)
             
-            # Draw the main text
-            draw.text((x_pos, y_pos), line, font=font, fill=font_color)
+            # If there are words to highlight, we need to draw each word separately
+            if highlight_words and any(word.lower() in line.lower() for word in highlight_words):
+                logger.info(f"[DEBUG] Line {i+1} contains words to highlight")
+                # Split the line into words while preserving Thai word boundaries
+                import re
+                # This regex pattern will match Thai words and other words with spaces
+                words = re.findall(r'[\u0E00-\u0E7F]+|[^\s]+', line)
+                logger.info(f"[DEBUG] Split line into words: {words}")
+                
+                current_x = x_pos
+                for word in words:
+                    # Check if this word should be highlighted
+                    word_to_draw = word
+                    word_color = font_color
+                    
+                    # Check if this word matches any highlight word (case insensitive)
+                    for highlight_word in highlight_words:
+                        if highlight_word.lower() in word.lower():
+                            word_color = highlight_color
+                            logger.info(f"[DEBUG] Highlighting word: '{word}' with color: {highlight_color}")
+                            break
+                    
+                    # Draw the word with appropriate color
+                    word_width = draw.textlength(word_to_draw + ' ', font=font)
+                    
+                    # Draw word border if specified
+                    if border_width > 0 and word_color != font_color:
+                        for offset_x in range(-border_width, border_width + 1):
+                            for offset_y in range(-border_width, border_width + 1):
+                                if offset_x != 0 or offset_y != 0:
+                                    draw.text((current_x + offset_x, y_pos + offset_y), word_to_draw, 
+                                             font=font, fill=border_color)
+                    
+                    # Draw the word
+                    draw.text((current_x, y_pos), word_to_draw, font=font, fill=word_color)
+                    
+                    # Add space after the word
+                    current_x += word_width
+            else:
+                # Draw the main text normally if no highlighting needed
+                draw.text((x_pos, y_pos), line, font=font, fill=font_color)
         
         # Save the output image
         output_image_path = os.path.join(temp_dir, f"output_title_{job_id}.jpg")
         new_img.save(output_image_path, quality=95)
+        logger.info(f"[DEBUG] Saved output image to: {output_image_path}")
         
         # Upload to GCS
         bucket_name = os.environ.get('GCP_BUCKET_NAME', 'nca-toolkit-thai-text-bucket')
         output_blob_name = f"{job_id}_titled_image.jpg"
+        logger.info(f"[DEBUG] Uploading to GCS bucket: {bucket_name}, blob: {output_blob_name}")
         
         # Use the correct GCP toolkit functions
         upload_to_gcs_with_path(output_image_path, bucket_name, output_blob_name)
         
         # Create public URL instead of signed URL
         public_url = f"https://storage.googleapis.com/{bucket_name}/{output_blob_name}"
+        logger.info(f"[DEBUG] Generated public URL: {public_url}")
         
         # Prepare result
         result = {
@@ -379,11 +614,13 @@ def process_add_title_to_image(image_url, title_lines, font_size, font_color,
             os.remove(input_image_path)
             os.remove(output_image_path)
             os.rmdir(temp_dir)
+            logger.info(f"[DEBUG] Cleaned up temporary files and directory: {temp_dir}")
         except Exception as e:
-            logger.warning(f"Error cleaning up temporary files: {str(e)}")
+            logger.warning(f"[DEBUG] Error cleaning up temporary files: {str(e)}")
         
+        logger.info(f"[DEBUG] Image processing completed successfully")
         return result
         
     except Exception as e:
-        logger.error(f"Error in process_add_title_to_image: {str(e)}")
+        logger.error(f"[DEBUG] Error in process_add_title_to_image: {str(e)}", exc_info=True)
         raise e
