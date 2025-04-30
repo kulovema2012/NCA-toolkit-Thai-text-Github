@@ -14,7 +14,8 @@ from services.gcp_toolkit import upload_to_gcs_with_path
 from services.file_management import download_file
 from services.v1.ffmpeg.ffmpeg_compose import find_thai_font
 
-# Set up logging
+# Set up logging with more detailed format
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Create blueprint
@@ -36,6 +37,9 @@ def add_title_to_video():
         "border_width": 2,
         "padding_top": 200,
         "padding_color": "white",
+        "text_align": "center",              # Optional: text alignment (left, center, right)
+        "max_lines": 3,                      # Optional: maximum number of lines to display
+        "padding_multiplier": 0.5,           # Optional: padding multiplier for breathing area (0.5 = 50% of font size)
         "id": "Optional job ID",
         "metadata": {
             "thumbnail": true,
@@ -50,7 +54,10 @@ def add_title_to_video():
         JSON with URL to the processed video and optional metadata
     """
     try:
+        logger.info("[DEBUG] Starting add_title_to_video endpoint processing")
+        
         data = request.get_json()
+        logger.info(f"[DEBUG] Received request data: {json.dumps(data, ensure_ascii=False)}")
         
         # Extract parameters
         video_url = data.get('video_url')
@@ -62,22 +69,36 @@ def add_title_to_video():
         border_width = data.get('border_width', 2)
         padding_top = data.get('padding_top', 200)
         padding_color = data.get('padding_color', 'white')
+        text_align = data.get('text_align', 'center')  # Default to center alignment
+        max_lines = data.get('max_lines', 3)  # Default to 3 lines maximum
+        padding_multiplier = data.get('padding_multiplier', 0.5)  # Default to 50% of font size
         job_id = data.get('id', f"title_{uuid.uuid4()}")
         metadata_request = data.get('metadata', {})
         
+        logger.info(f"[DEBUG] Processing parameters - Font: {font_name}, Align: {text_align}, Max Lines: {max_lines}")
+        logger.info(f"[DEBUG] Title text: {title}")
+        logger.info(f"[DEBUG] Padding multiplier: {padding_multiplier}")
+        
         # Validate required parameters
         if not video_url:
+            logger.warning("[DEBUG] Missing required parameter: video_url")
             return jsonify({"error": "Missing required parameter: video_url"}), 400
         if not title:
+            logger.warning("[DEBUG] Missing required parameter: title")
             return jsonify({"error": "Missing required parameter: title"}), 400
             
         # Auto-detect Thai text and set default font
         is_thai = bool(re.search(r'[\u0E00-\u0E7F]', title))
         if not font_name:
             font_name = "Sarabun" if is_thai else "Arial"
+        
+        # Clean title text by removing colons and semicolons
+        title = clean_title_text(title)
+        logger.info(f"[DEBUG] Cleaned title: {title}")
             
-        # Process the title with proper Thai text handling
-        title_lines = smart_split_thai_text(title)
+        # Process the title with adaptive Thai text handling
+        title_lines = adaptive_split_thai_text(title, max_lines)
+        logger.info(f"[DEBUG] Split title into {len(title_lines)} lines: {title_lines}")
         
         # Process the video
         result = process_add_title(
@@ -90,15 +111,54 @@ def add_title_to_video():
             border_width=border_width,
             padding_top=padding_top,
             padding_color=padding_color,
+            text_align=text_align,
+            padding_multiplier=padding_multiplier,
             job_id=job_id,
             metadata_request=metadata_request
         )
         
+        logger.info(f"[DEBUG] Video processing completed, result URL: {result.get('video_url', 'No URL')}")
         return jsonify(result)
         
     except Exception as e:
-        logger.error(f"Error in add_title_to_video: {str(e)}")
+        logger.error(f"[DEBUG] Error in add_title_to_video: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
+
+def clean_title_text(text):
+    """
+    Clean title text by removing colons and semicolons.
+    
+    Args:
+        text: The title text to clean
+        
+    Returns:
+        Cleaned text without colons or semicolons
+    """
+    # Remove colons and semicolons
+    cleaned_text = text.replace(':', '').replace(';', '')
+    
+    # If the text contains Thai characters, we need to handle it differently
+    if re.search(r'[\u0E00-\u0E7F]', text):
+        # For Thai text with colons or semicolons, we want to split at those points
+        # but not include the punctuation
+        if ':' in text:
+            parts = text.split(':', 1)
+            if len(parts) == 2:
+                title_part = parts[0].strip()
+                subtitle_part = parts[1].strip()
+                # Join with a space instead of the colon
+                cleaned_text = f"{title_part} {subtitle_part}"
+        
+        # Same for semicolons
+        if ';' in cleaned_text:
+            parts = cleaned_text.split(';', 1)
+            if len(parts) == 2:
+                title_part = parts[0].strip()
+                subtitle_part = parts[1].strip()
+                # Join with a space instead of the semicolon
+                cleaned_text = f"{title_part} {subtitle_part}"
+    
+    return cleaned_text
 
 def smart_split_thai_text(text, max_chars_per_line=30):
     """
@@ -173,7 +233,7 @@ def smart_split_thai_text(text, max_chars_per_line=30):
         # Check if adding this word would exceed the max line length
         if len(current_line) + len(word) + (1 if current_line else 0) <= max_chars_per_line:
             if current_line:
-                current_line += word
+                current_line += " " + word
             else:
                 current_line = word
         else:
@@ -188,8 +248,62 @@ def smart_split_thai_text(text, max_chars_per_line=30):
     
     return lines
 
+def adaptive_split_thai_text(text, max_lines):
+    """
+    Adaptively split Thai text to fit within a specified number of lines.
+    Adjusts the characters per line based on the maximum number of lines allowed.
+    
+    Args:
+        text: The text to split
+        max_lines: Maximum number of lines to use
+        
+    Returns:
+        List of lines that fit within the max_lines constraint
+    """
+    # If text is empty or max_lines is 0, return empty list
+    if not text or max_lines <= 0:
+        return []
+    
+    # Start with a reasonable character limit
+    chars_per_line = 30
+    
+    # Get initial split
+    lines = smart_split_thai_text(text, max_chars_per_line=chars_per_line)
+    
+    # If it already fits, we're done
+    if len(lines) <= max_lines:
+        logger.info(f"[DEBUG] Text fits in {len(lines)} lines with {chars_per_line} chars per line")
+        return lines
+    
+    # Binary search to find the optimal characters per line
+    min_chars = 10  # Minimum reasonable characters per line
+    max_chars = 100  # Maximum reasonable characters per line
+    
+    while min_chars <= max_chars:
+        mid_chars = (min_chars + max_chars) // 2
+        lines = smart_split_thai_text(text, max_chars_per_line=mid_chars)
+        
+        if len(lines) <= max_lines:
+            # This works, but try to find a smaller chars_per_line that still works
+            max_chars = mid_chars - 1
+            chars_per_line = mid_chars  # Save this working value
+        else:
+            # Too many lines, need more chars per line
+            min_chars = mid_chars + 1
+    
+    # Use the last working value
+    lines = smart_split_thai_text(text, max_chars_per_line=chars_per_line)
+    
+    # If we still have too many lines (shouldn't happen due to binary search), force truncate
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+    
+    logger.info(f"[DEBUG] Adaptive split: {len(lines)} lines with {chars_per_line} chars per line")
+    return lines
+
 def process_add_title(video_url, title_lines, font_name, font_size, font_color, 
-                     border_color, border_width, padding_top, padding_color, job_id, metadata_request=None):
+                     border_color, border_width, padding_top, padding_color, job_id, 
+                     text_align='center', padding_multiplier=0.5, metadata_request=None):
     """
     Process the video to add a title with padding.
     
@@ -204,18 +318,29 @@ def process_add_title(video_url, title_lines, font_name, font_size, font_color,
         padding_top: Top padding in pixels
         padding_color: Padding color
         job_id: Job ID
+        text_align: Text alignment (left, center, right)
+        padding_multiplier: Multiplier for padding space (breathing area) above and below text
         metadata_request: Dictionary specifying which metadata to include
         
     Returns:
         Dictionary with result information
     """
     try:
+        logger.info(f"[DEBUG] Starting video processing with job_id: {job_id}")
+        logger.info(f"[DEBUG] Video URL: {video_url}")
+        logger.info(f"[DEBUG] Title lines: {title_lines}")
+        logger.info(f"[DEBUG] Font settings: size={font_size}, color={font_color}, name={font_name}")
+        logger.info(f"[DEBUG] Text alignment: {text_align}")
+        logger.info(f"[DEBUG] Padding multiplier: {padding_multiplier}")
+        
         # Create temporary directory
         temp_dir = tempfile.mkdtemp()
+        logger.info(f"[DEBUG] Created temp directory: {temp_dir}")
         
         # Download the video
         input_video = os.path.join(temp_dir, f"input_{job_id}.mp4")
         download_file(video_url, input_video)
+        logger.info(f"[DEBUG] Downloaded video to: {input_video}")
         
         # Get video dimensions
         ffprobe_cmd = [
@@ -232,6 +357,7 @@ def process_add_title(video_url, title_lines, font_name, font_size, font_color,
         
         original_width = video_info["streams"][0]["width"]
         original_height = video_info["streams"][0]["height"]
+        logger.info(f"[DEBUG] Original video dimensions: {original_width}x{original_height}")
         
         # We want to maintain the final dimensions at original size (e.g., 1080x1920)
         # So we need to scale the video down to make room for the padding
@@ -244,26 +370,54 @@ def process_add_title(video_url, title_lines, font_name, font_size, font_color,
         # Calculate line height and positions for perfect vertical centering
         total_lines = len(title_lines)
         
-        # Increase line spacing for better readability
-        line_spacing = 15  # Pixels between lines
+        # Adjust line spacing to 30% of font size for better readability (like in image tool)
+        line_spacing = int(font_size * 0.3)
+        logger.info(f"[DEBUG] Using line spacing: {line_spacing}px (30% of font size)")
         
         # Calculate the total height of all text lines including spacing
         total_text_height = (total_lines * font_size) + ((total_lines - 1) * line_spacing)
         
-        # Calculate starting Y position to center text vertically in the padding area
-        y_start = (padding_top - total_text_height) / 2
+        # Add extra padding above and below text using the padding_multiplier parameter
+        extra_padding = int(font_size * padding_multiplier)
+        logger.info(f"[DEBUG] Extra padding: {extra_padding}px ({padding_multiplier} * font size)")
+        
+        # Calculate minimum required padding
+        min_required_padding = total_text_height + (extra_padding * 2)
+        logger.info(f"[DEBUG] Calculated min required padding: {min_required_padding}px")
+        
+        # If requested padding is less than required, increase it
+        if padding_top < min_required_padding:
+            padding_top = min_required_padding
+            logger.info(f"[DEBUG] Increased padding to {padding_top}px to fit text properly")
+            
+            # Recalculate video height with new padding
+            video_height = target_height - padding_top
+            if video_height <= 0:
+                # If padding would take up entire video, reduce padding to half the video height
+                padding_top = original_height // 2
+                video_height = original_height - padding_top
+                logger.warning(f"[DEBUG] Padding was too large, reduced to {padding_top}px")
+        
+        # Calculate starting Y position to center text vertically in the padding area with extra space
+        y_start = extra_padding
+        logger.info(f"[DEBUG] Text starting Y position: {y_start}")
         
         # Find Thai font using the existing function
         thai_font_path = find_thai_font()
         if not thai_font_path:
-            logger.warning(f"No Thai font found, using default font specification: {font_name}")
+            logger.warning(f"[DEBUG] No Thai font found, using default font specification: {font_name}")
             font_path = f"/usr/share/fonts/truetype/thai-tlwg/{font_name}.ttf"
         else:
-            logger.info(f"Using Thai font: {thai_font_path}")
+            logger.info(f"[DEBUG] Using Thai font: {thai_font_path}")
             font_path = thai_font_path
         
         # Create drawtext filters for each line with improved spacing
         drawtext_filters = []
+        
+        # Set margins for text alignment
+        left_margin = 30  # Left margin for left-aligned text
+        right_margin = 30  # Right margin for right-aligned text
+        
         for i, line in enumerate(title_lines):
             # Escape single quotes for FFmpeg
             escaped_line = line.replace("'", "'\\''")
@@ -282,27 +436,39 @@ def process_add_title(video_url, title_lines, font_name, font_size, font_color,
             else:
                 current_font_path = font_path
             
-            # Use a slightly larger font size for Thai text to improve readability
-            current_font_size = font_size
+            # Add a shadow for better visibility for Thai text
             if is_thai:
-                # Add a shadow for better visibility
                 shadow_option = ":shadowcolor=black:shadowx=1:shadowy=1"
             else:
                 shadow_option = ""
             
+            # Set x position based on text alignment
+            if text_align == 'center':
+                x_position = "(w-text_w)/2"
+            elif text_align == 'left':
+                x_position = str(left_margin)
+            elif text_align == 'right':
+                x_position = f"w-text_w-{right_margin}"
+            else:
+                logger.warning(f"[DEBUG] Unknown text alignment: {text_align}. Defaulting to center.")
+                x_position = "(w-text_w)/2"
+                
+            logger.info(f"[DEBUG] Line {i+1} alignment: {text_align}, x position: {x_position}")
+            
             filter_text = (
                 f"drawtext=text='{escaped_line}':"
                 f"fontfile={current_font_path}:"
-                f"fontsize={current_font_size}:"
+                f"fontsize={font_size}:"
                 f"fontcolor={font_color}:"
                 f"bordercolor={border_color}:"
                 f"borderw={border_width}{shadow_option}:"
-                # Ensure text is centered horizontally
-                f"x=(w-text_w)/2:"
+                # Position text based on alignment
+                f"x={x_position}:"
                 # Position text precisely
                 f"y={int(y_pos)}"
             )
             drawtext_filters.append(filter_text)
+            logger.info(f"[DEBUG] Created filter for line {i+1}: '{escaped_line}' at y={int(y_pos)}")
         
         # Create the full filter string - Scale video first, then add padding
         # This keeps the final dimensions at the original size
@@ -324,11 +490,14 @@ def process_add_title(video_url, title_lines, font_name, font_size, font_color,
             output_video
         ]
         
+        logger.info(f"[DEBUG] Running FFmpeg command with filter: {filter_string}")
         subprocess.run(ffmpeg_cmd, check=True)
+        logger.info(f"[DEBUG] FFmpeg command completed successfully")
         
         # Upload to GCS
         destination_path = f"titled_videos/{os.path.basename(output_video)}"
         video_url = upload_to_gcs_with_path(output_video, destination_path=destination_path)
+        logger.info(f"[DEBUG] Uploaded video to GCS: {video_url}")
         
         # Prepare result
         result = {
@@ -358,10 +527,12 @@ def process_add_title(video_url, title_lines, font_name, font_size, font_color,
                 thumbnail_dest = f"thumbnails/{os.path.basename(thumbnail_path)}"
                 thumbnail_url = upload_to_gcs_with_path(thumbnail_path, destination_path=thumbnail_dest)
                 metadata["thumbnail_url"] = thumbnail_url
+                logger.info(f"[DEBUG] Generated and uploaded thumbnail: {thumbnail_url}")
             
             # Get file size if requested
             if metadata_request.get('filesize'):
                 metadata["filesize"] = os.path.getsize(output_video)
+                logger.info(f"[DEBUG] File size: {metadata['filesize']} bytes")
             
             # Get duration, bitrate, and encoder info if requested
             if metadata_request.get('duration') or metadata_request.get('bitrate') or metadata_request.get('encoder'):
@@ -383,6 +554,8 @@ def process_add_title(video_url, title_lines, font_name, font_size, font_color,
                 
                 if metadata_request.get('encoder') and 'streams' in media_info and len(media_info['streams']) > 0:
                     metadata["encoder"] = media_info['streams'][0].get('codec_name', 'unknown')
+                
+                logger.info(f"[DEBUG] Media info metadata: {metadata}")
             
             # Add metadata to result
             result["metadata"] = metadata
@@ -394,13 +567,15 @@ def process_add_title(video_url, title_lines, font_name, font_size, font_color,
             if metadata_request and metadata_request.get('thumbnail'):
                 os.remove(thumbnail_path)
             os.rmdir(temp_dir)
+            logger.info(f"[DEBUG] Cleaned up temporary files and directory: {temp_dir}")
         except Exception as e:
-            logger.warning(f"Could not clean up all temporary files for job {job_id}: {e}")
+            logger.warning(f"[DEBUG] Could not clean up all temporary files for job {job_id}: {e}")
         
+        logger.info(f"[DEBUG] Video processing completed successfully")
         return result
         
     except Exception as e:
-        logger.error(f"Error processing video title: {str(e)}")
+        logger.error(f"[DEBUG] Error processing video title: {str(e)}", exc_info=True)
         return {
             "id": job_id,
             "status": "error",
