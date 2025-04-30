@@ -42,7 +42,8 @@ def add_title_to_image():
         "highlight_words": ["word1", "word2"],  # Optional: words to highlight
         "highlight_color": "#ffff00",        # Optional: color for highlighted words
         "auto_highlight": true,              # Optional: automatically highlight important words
-        "highlight_count": 2                 # Optional: number of words to auto-highlight
+        "highlight_count": 2,                # Optional: number of words to auto-highlight
+        "padding_multiplier": 0.5            # Optional: padding multiplier for breathing area (0.5 = 50% of font size)
     }
     
     Returns:
@@ -79,9 +80,11 @@ def add_title_to_image():
         highlight_color = data.get('highlight_color', '#ffff00')  # Highlight color
         auto_highlight = data.get('auto_highlight', False)  # Auto-highlight important words
         highlight_count = data.get('highlight_count', 2)  # Number of words to auto-highlight
+        padding_multiplier = data.get('padding_multiplier', 0.5)  # Default to 50% of font size
         
         logger.info(f"[DEBUG] Processing parameters - Font: {font_name}, Align: {text_align}, Max Lines: {max_lines}")
         logger.info(f"[DEBUG] Title text: {title}")
+        logger.info(f"[DEBUG] Padding multiplier: {padding_multiplier}")
         
         # Generate a unique job ID
         import uuid
@@ -120,7 +123,8 @@ def add_title_to_image():
             font_name=font_name,
             text_align=text_align,
             highlight_words=highlight_words,
-            highlight_color=highlight_color
+            highlight_color=highlight_color,
+            padding_multiplier=padding_multiplier
         )
         
         logger.info(f"[DEBUG] Image processing completed, result URL: {result.get('url', 'No URL')}")
@@ -441,7 +445,7 @@ def adaptive_split_thai_text(text, max_lines):
 
 def process_add_title_to_image(image_url, title_lines, font_size, font_color, 
                               border_color, border_width, padding_bottom, padding_color, job_id, font_name=None,
-                              text_align='center', highlight_words=[], highlight_color='#ffff00'):
+                              text_align='center', highlight_words=[], highlight_color='#ffff00', padding_multiplier=0.5):
     """
     Process the image to add a title with padding.
     
@@ -459,6 +463,7 @@ def process_add_title_to_image(image_url, title_lines, font_size, font_color,
         text_align: Text alignment (left, center, right)
         highlight_words: Words to highlight
         highlight_color: Color for highlighted words
+        padding_multiplier: Multiplier for padding space (breathing area) above and below text (default: 0.5)
         
     Returns:
         Dictionary with result information
@@ -470,6 +475,7 @@ def process_add_title_to_image(image_url, title_lines, font_size, font_color,
         logger.info(f"[DEBUG] Font settings: size={font_size}, color={font_color}, name={font_name}")
         logger.info(f"[DEBUG] Text alignment: {text_align}")
         logger.info(f"[DEBUG] Highlight settings: words={highlight_words}, color={highlight_color}")
+        logger.info(f"[DEBUG] Padding multiplier: {padding_multiplier}")
         
         # Create temporary directory
         temp_dir = tempfile.mkdtemp()
@@ -496,12 +502,12 @@ def process_add_title_to_image(image_url, title_lines, font_size, font_color,
         # Calculate the total height of all text lines including spacing
         total_text_height = (total_lines * font_size) + ((total_lines - 1) * line_spacing)
         
-        # Add extra padding above and below text (50% of font size)
-        extra_padding = int(font_size * 0.5)
+        # Add extra padding above and below text (using the padding_multiplier parameter)
+        extra_padding = int(font_size * padding_multiplier)
         
         # Calculate minimum required padding
         min_required_padding = total_text_height + (extra_padding * 2)
-        logger.info(f"[DEBUG] Calculated min required padding: {min_required_padding}px")
+        logger.info(f"[DEBUG] Calculated min required padding: {min_required_padding}px (with padding multiplier: {padding_multiplier})")
         
         # If requested padding is less than required, increase it
         if padding_bottom < min_required_padding:
