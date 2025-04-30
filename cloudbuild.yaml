@@ -35,3 +35,7 @@ steps:
 
 images:
   - 'gcr.io/$PROJECT_ID/no-code-architects-toolkit'
+
+# Add logging options to fix the service account error
+options:
+  logging: CLOUD_LOGGING_ONLY
