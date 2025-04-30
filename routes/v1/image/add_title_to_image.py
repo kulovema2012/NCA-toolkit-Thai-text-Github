@@ -93,14 +93,8 @@ def add_title_to_image():
         logger.info(f"[DEBUG] Cleaned title: {title}")
         
         # Split title into lines for better display
-        from routes.v1.video.add_title_to_video import smart_split_thai_text
-        title_lines = smart_split_thai_text(title, max_chars_per_line=30)
+        title_lines = adaptive_split_thai_text(title, max_lines)
         logger.info(f"[DEBUG] Split title into {len(title_lines)} lines: {title_lines}")
-        
-        # Limit to max_lines if specified
-        if max_lines > 0 and len(title_lines) > max_lines:
-            logger.info(f"[DEBUG] Limiting title from {len(title_lines)} to {max_lines} lines")
-            title_lines = title_lines[:max_lines]
         
         # Auto-highlight important words if requested
         if auto_highlight:
@@ -389,6 +383,61 @@ def find_important_words(text, count):
     
     logger.info(f"[DEBUG] Final selected words to highlight: {final_words}")
     return final_words
+
+def adaptive_split_thai_text(text, max_lines):
+    """
+    Adaptively split Thai text to fit within a specified number of lines.
+    Adjusts the characters per line based on the maximum number of lines allowed.
+    
+    Args:
+        text: The text to split
+        max_lines: Maximum number of lines to use
+        
+    Returns:
+        List of lines that fit within the max_lines constraint
+    """
+    from routes.v1.video.add_title_to_video import smart_split_thai_text
+    
+    # If text is empty or max_lines is 0, return empty list
+    if not text or max_lines <= 0:
+        return []
+    
+    # Start with a reasonable character limit
+    chars_per_line = 30
+    
+    # Get initial split
+    lines = smart_split_thai_text(text, max_chars_per_line=chars_per_line)
+    
+    # If it already fits, we're done
+    if len(lines) <= max_lines:
+        logger.info(f"[DEBUG] Text fits in {len(lines)} lines with {chars_per_line} chars per line")
+        return lines
+    
+    # Binary search to find the optimal characters per line
+    min_chars = 10  # Minimum reasonable characters per line
+    max_chars = 100  # Maximum reasonable characters per line
+    
+    while min_chars <= max_chars:
+        mid_chars = (min_chars + max_chars) // 2
+        lines = smart_split_thai_text(text, max_chars_per_line=mid_chars)
+        
+        if len(lines) <= max_lines:
+            # This works, but try to find a smaller chars_per_line that still works
+            max_chars = mid_chars - 1
+            chars_per_line = mid_chars  # Save this working value
+        else:
+            # Too many lines, need more chars per line
+            min_chars = mid_chars + 1
+    
+    # Use the last working value
+    lines = smart_split_thai_text(text, max_chars_per_line=chars_per_line)
+    
+    # If we still have too many lines (shouldn't happen due to binary search), force truncate
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+    
+    logger.info(f"[DEBUG] Adaptive split: {len(lines)} lines with {chars_per_line} chars per line")
+    return lines
 
 def process_add_title_to_image(image_url, title_lines, font_size, font_color, 
                               border_color, border_width, padding_bottom, padding_color, job_id, font_name=None,
