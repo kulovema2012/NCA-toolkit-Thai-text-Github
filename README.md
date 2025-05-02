@@ -1,5 +1,3 @@
-![Original Logo Symbol](https://github.com/user-attachments/assets/75173cf4-2502-4710-998b-6b81740ae1bd)
-
 # No-Code Architects Toolkit API 
 
 Tired of wasting thousands of dollars on API subscriptions to support all your automations? What if there was a free alternative?
@@ -105,6 +103,51 @@ Each feature is supported by robust payload validation and detailed API document
 - **Documentation Link**: [Authenticate Endpoint Documentation](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/toolkit/authenticate.md)
 
 ---
+
+## Deployment Options
+
+### Railway Deployment (Recommended)
+
+The NCA Toolkit is configured for automatic deployment to Railway. This provides a simple, efficient way to deploy your API with minimal configuration.
+
+#### Setting Up Railway Deployment
+
+1. **Connect Your GitHub Repository**
+   - In Railway, create a new project
+   - Select "Deploy from GitHub repo"
+   - Choose your repository (kulovema2012/NCA-toolkit-Thai-text-Github)
+   - Railway will automatically detect your Dockerfile
+
+2. **Configure Environment Variables**
+   - Go to the "Variables" tab in your Railway project
+   - Add necessary environment variables (API keys, service credentials, etc.)
+
+3. **Configure Deployment Settings**
+   - In the "Settings" tab:
+     - Connect the `main` branch to production
+     - Enable "Wait for CI" if you're using GitHub Actions
+     - Set resource limits (CPU/Memory) as needed
+
+4. **Branch-Based Deployments**
+   - Railway automatically deploys the `main` branch to production
+   - For testing features, push to a `deploy/feature-name` branch
+   - Railway will create a preview environment for these branches
+
+#### Accessing Your Railway Deployment
+
+- Production: `https://nca-toolkit-thai-text-github-production.up.railway.app`
+- Preview environments: Check the Railway dashboard for URLs
+
+#### Reverting to Stable Version
+
+If you encounter issues with a deployment:
+
+1. Reset the `main` branch to `stable-main` (see GIT_WORKFLOW.md)
+2. Railway will automatically deploy the stable version
+
+For more detailed information about the Git workflow with Railway, see [GIT_WORKFLOW.md](./GIT_WORKFLOW.md).
+
+### Google Cloud Deployment (Alternative)
 
 ## Docker Build and Run
 
