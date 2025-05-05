@@ -13,6 +13,7 @@ from io import BytesIO
 from pythainlp import word_tokenize
 
 from services.gcp_toolkit import upload_to_gcs_with_path, generate_signed_url
+from storage_utils import upload_file, get_file_url
 
 # Set up logging with more detailed format
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -637,21 +638,28 @@ def process_add_title_to_image(image_url, title_lines, font_size, font_color,
         new_img.save(output_image_path, quality=95)
         logger.info(f"[DEBUG] Saved output image to: {output_image_path}")
         
-        # Upload to GCS
-        bucket_name = os.environ.get('GCP_BUCKET_NAME', 'nca-toolkit-thai-text-bucket')
+        # Upload using the storage utility (MinIO with GCS fallback)
         output_blob_name = f"{job_id}_titled_image.jpg"
-        logger.info(f"[DEBUG] Uploading to GCS bucket: {bucket_name}, blob: {output_blob_name}")
+        logger.info(f"[DEBUG] Uploading image using storage utility, blob: {output_blob_name}")
         
-        # Use the correct GCP toolkit functions
-        upload_to_gcs_with_path(output_image_path, bucket_name, output_blob_name)
+        # Upload the file and get the public URL
+        success, public_url, storage_used = upload_file(
+            output_image_path,
+            object_name=output_blob_name,
+            content_type="image/jpeg",
+            folder="titled-images",
+            make_public=True
+        )
         
-        # Create public URL instead of signed URL
-        public_url = f"https://storage.googleapis.com/{bucket_name}/{output_blob_name}"
-        logger.info(f"[DEBUG] Generated public URL: {public_url}")
+        if not success:
+            raise Exception("Failed to upload image to storage")
+            
+        logger.info(f"[DEBUG] Uploaded to {storage_used} storage with URL: {public_url}")
         
         # Prepare result
         result = {
             "url": public_url,
+            "storage_provider": storage_used,
             "dimensions": {
                 "original": {
                     "width": original_width,
