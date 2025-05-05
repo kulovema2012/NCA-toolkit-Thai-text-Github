@@ -12,7 +12,9 @@ import numpy as np
 from io import BytesIO
 from pythainlp import word_tokenize
 
-from services.gcp_toolkit import upload_to_gcs_with_path, generate_signed_url
+# Comment out GCP imports but keep them for future use
+# from services.gcp_toolkit import upload_to_gcs_with_path, generate_signed_url
+# Import only the storage utility
 from storage_utils import upload_file, get_file_url
 
 # Set up logging with more detailed format
