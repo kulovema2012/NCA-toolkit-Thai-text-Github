@@ -19,8 +19,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Storage configuration
-DEFAULT_STORAGE = os.getenv("DEFAULT_STORAGE", "minio")
-FALLBACK_STORAGE = os.getenv("FALLBACK_STORAGE", "gcp")
+DEFAULT_STORAGE = "minio"  # Force MinIO as default
+FALLBACK_STORAGE = "none"  # Disable fallback to avoid GCP
 
 # MinIO configuration
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "")
@@ -29,7 +29,7 @@ MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "")
 MINIO_SECURE = os.getenv("MINIO_SECURE", "true").lower() == "true"
 MINIO_BUCKET_NAME = os.getenv("MINIO_BUCKET_NAME", "")
 
-# Google Cloud Storage configuration
+# Google Cloud Storage configuration (kept for future use)
 GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID", "")
 GCP_BUCKET_NAME = os.getenv("GCP_BUCKET_NAME", "")
 
