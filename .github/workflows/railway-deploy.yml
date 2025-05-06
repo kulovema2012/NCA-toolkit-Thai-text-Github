@@ -27,8 +27,6 @@ jobs:
       - name: Deploy to Railway
         run: |
           echo "Deploying to Railway..."
-          # Use PROJECT_ID to specify which project to deploy to
-          railway link ${{ secrets.RAILWAY_PROJECT_ID }}
-          railway up --detach
+          railway up
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
