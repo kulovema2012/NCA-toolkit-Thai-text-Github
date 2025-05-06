@@ -27,6 +27,8 @@ jobs:
       - name: Deploy to Railway
         run: |
           echo "Deploying to Railway..."
-          railway up --service=${{ github.ref_name }} --detach
+          # Use PROJECT_ID to specify which project to deploy to
+          railway link ${{ secrets.RAILWAY_PROJECT_ID }}
+          railway up --detach
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
