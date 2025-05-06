@@ -1,8 +1,9 @@
-name: Deploy to Google Cloud Run
+name: Deploy to Google Cloud Run (DISABLED)
 
-on:
-  push:
-    branches: [ main ]
+# Disable this workflow by commenting out the trigger
+# on:
+#   push:
+#     branches: [ main ]
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT }}
@@ -12,6 +13,8 @@ env:
 
 jobs:
   deploy:
+    # Skip this job entirely
+    if: false
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
