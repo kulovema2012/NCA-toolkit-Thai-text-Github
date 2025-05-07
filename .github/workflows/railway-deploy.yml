@@ -11,6 +11,8 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
     
     steps:
       - name: Checkout code
@@ -36,8 +38,7 @@ jobs:
           echo "Current directory: $(pwd)"
           echo "Directory contents:"
           ls -la
-          echo "Railway CLI help:"
-          railway --help
+          echo "Railway token is set: ${{ env.RAILWAY_TOKEN != '' }}"
       
       - name: Create Project Config
         run: |
@@ -46,13 +47,21 @@ jobs:
           echo "railway.json created:"
           cat railway.json
       
+      - name: Export Token to File
+        run: |
+          echo "Debug: Exporting token to file..."
+          echo "${{ secrets.RAILWAY_TOKEN }}" > railway_token.txt
+          echo "Token file created with length: $(wc -c < railway_token.txt) characters"
+      
       - name: Deploy to Railway
         run: |
           echo "Debug: Starting deployment to Railway..."
-          echo "Using RAILWAY_TOKEN for authentication"
+          echo "Using token from file for authentication"
+          export RAILWAY_TOKEN=$(cat railway_token.txt)
+          echo "Token environment variable set with length: ${#RAILWAY_TOKEN} characters"
           echo "Project ID from railway.json: $(cat railway.json | grep projectId)"
+          echo "Running railway whoami command to verify authentication:"
+          railway whoami || echo "Authentication failed"
           echo "Running railway up command..."
-          railway up
-          echo "Deployment completed successfully"
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          railway up || echo "Deployment failed with exit code $?"
+          echo "Deployment command completed"
