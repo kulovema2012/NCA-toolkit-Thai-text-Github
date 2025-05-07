@@ -24,9 +24,16 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
       
+      - name: Configure Railway
+        run: |
+          echo "Configuring Railway project..."
+          # Store the project ID in a temporary file
+          echo '{"projectId":"${{ secrets.RAILWAY_PROJECT_ID }}"}' > .railway-project-config.json
+      
       - name: Deploy to Railway
         run: |
           echo "Deploying to Railway..."
-          railway up
+          # Use the project config file
+          railway up --config .railway-project-config.json
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
