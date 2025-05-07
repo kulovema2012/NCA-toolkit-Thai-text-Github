@@ -22,18 +22,37 @@ jobs:
           node-version: '16'
       
       - name: Install Railway CLI
-        run: npm install -g @railway/cli
-      
-      - name: Configure Railway
         run: |
-          echo "Configuring Railway project..."
-          # Store the project ID in a temporary file
-          echo '{"projectId":"${{ secrets.RAILWAY_PROJECT_ID }}"}' > .railway-project-config.json
+          echo "Installing Railway CLI..."
+          npm install -g @railway/cli
+          echo "Railway CLI version:"
+          railway --version
+      
+      - name: Debug Environment
+        run: |
+          echo "Debug: Checking environment setup..."
+          echo "Node version: $(node --version)"
+          echo "NPM version: $(npm --version)"
+          echo "Current directory: $(pwd)"
+          echo "Directory contents:"
+          ls -la
+          echo "Railway CLI help:"
+          railway --help
+      
+      - name: Create Project Config
+        run: |
+          echo "Debug: Creating temporary railway.json file..."
+          echo '{"projectId":"${{ secrets.RAILWAY_PROJECT_ID }}"}' > railway.json
+          echo "railway.json created:"
+          cat railway.json
       
       - name: Deploy to Railway
         run: |
-          echo "Deploying to Railway..."
-          # Use the project config file
-          railway up --config .railway-project-config.json
+          echo "Debug: Starting deployment to Railway..."
+          echo "Using RAILWAY_TOKEN for authentication"
+          echo "Project ID from railway.json: $(cat railway.json | grep projectId)"
+          echo "Running railway up command..."
+          railway up
+          echo "Deployment completed successfully"
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
