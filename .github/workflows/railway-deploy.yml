@@ -1,10 +1,11 @@
-name: Deploy to Railway
+# This workflow is currently disabled in favor of Railway's direct GitHub integration
+# Rename this file to railway-deploy.yml.disabled to completely disable it
+
+name: Deploy to Railway (Disabled)
 
 on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
+  # Removed push trigger to disable automatic deployment through GitHub Actions
+  workflow_dispatch: # Manual trigger only for testing
 
 jobs:
   deploy:
@@ -17,6 +18,9 @@ jobs:
         run: npm install -g @railway/cli
       
       - name: Deploy to Railway
-        run: railway up
+        run: |
+          echo "This workflow is disabled. Using Railway's direct GitHub integration instead."
+          echo "RAILWAY_TOKEN is configured in GitHub Secrets"
+          echo "For manual deployment, use: railway login && railway link && railway up"
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
