@@ -46,11 +46,29 @@ def init_minio_client():
     
     try:
         from minio import Minio
+        # Extract the endpoint without protocol
+        endpoint = MINIO_ENDPOINT.replace("http://", "").replace("https://", "")
+        # Remove any port specification if present
+        if ":" in endpoint:
+            endpoint_parts = endpoint.split(":")
+            endpoint = endpoint_parts[0]
+            # If it's a Railway internal endpoint, use port 9000
+            if "railway.internal" in endpoint:
+                port = 9000
+            else:
+                # Use the specified port or default to 443 for secure, 80 for non-secure
+                port = int(endpoint_parts[1]) if len(endpoint_parts) > 1 else (443 if MINIO_SECURE else 80)
+        else:
+            port = 443 if MINIO_SECURE else 80
+            
+        logger.debug(f"Connecting to MinIO at {endpoint}:{port} (secure={MINIO_SECURE})")
+        
         minio_client = Minio(
-            MINIO_ENDPOINT.replace("http://", "").replace("https://", ""),
+            endpoint,
             access_key=MINIO_ACCESS_KEY,
             secret_key=MINIO_SECRET_KEY,
-            secure=MINIO_SECURE
+            secure=MINIO_SECURE,
+            port=port
         )
         
         # Check if bucket exists, create if it doesn't
@@ -179,9 +197,18 @@ def _upload_to_minio(
 ) -> Tuple[bool, str]:
     """Upload a file to MinIO storage."""
     try:
+        # Log MinIO client state
+        logger.debug(f"MinIO client: endpoint={MINIO_ENDPOINT}, bucket={MINIO_BUCKET_NAME}, secure={MINIO_SECURE}")
+        
+        # Ensure MinIO client is initialized
+        if minio_client is None:
+            logger.error("MinIO client is not initialized")
+            return False, ""
+            
         # Convert file_data to appropriate format
         if isinstance(file_data, str) and os.path.isfile(file_data):
             # It's a file path
+            logger.debug(f"Uploading file from path: {file_data}")
             minio_client.fput_object(
                 MINIO_BUCKET_NAME, 
                 object_name, 
@@ -190,6 +217,7 @@ def _upload_to_minio(
             )
         elif isinstance(file_data, bytes):
             # It's bytes data
+            logger.debug(f"Uploading {len(file_data)} bytes of data")
             minio_client.put_object(
                 MINIO_BUCKET_NAME,
                 object_name,
@@ -199,6 +227,7 @@ def _upload_to_minio(
             )
         else:
             # Assume it's a file-like object
+            logger.debug("Uploading from file-like object")
             file_size = file_data.seek(0, 2)
             file_data.seek(0)
             minio_client.put_object(
@@ -216,7 +245,11 @@ def _upload_to_minio(
         
         # For Railway internal endpoints, use the public URL format
         if "railway.internal" in endpoint:
+            # Use the Railway public URL without port specification for public access
             url = f"https://bucket-production-dce5.up.railway.app/{MINIO_BUCKET_NAME}/{object_name}"
+            
+            # For internal operations, continue using the internal endpoint
+            logger.debug(f"Using Railway internal endpoint for MinIO: {MINIO_ENDPOINT}")
         else:
             url = f"{protocol}://{endpoint}/{MINIO_BUCKET_NAME}/{object_name}"
         
