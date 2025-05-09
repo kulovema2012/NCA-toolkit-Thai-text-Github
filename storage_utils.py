@@ -42,34 +42,54 @@ def init_minio_client():
     global minio_client
     if not all([MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET_NAME]):
         logger.warning("MinIO credentials not fully configured. MinIO storage will not be available.")
+        logger.warning(f"Missing credentials: ENDPOINT={not MINIO_ENDPOINT}, ACCESS_KEY={not MINIO_ACCESS_KEY}, SECRET_KEY={not MINIO_SECRET_KEY}, BUCKET={not MINIO_BUCKET_NAME}")
         return False
     
     try:
         from minio import Minio
+        # Log the raw endpoint for debugging
+        logger.info(f"Initializing MinIO client with raw endpoint: {MINIO_ENDPOINT}")
+        
         # Extract the endpoint without protocol
         endpoint = MINIO_ENDPOINT.replace("http://", "").replace("https://", "")
+        
+        # Special handling for Railway internal endpoints
+        is_railway_internal = "railway.internal" in endpoint
+        
         # Remove any port specification if present
         if ":" in endpoint:
             endpoint_parts = endpoint.split(":")
             endpoint = endpoint_parts[0]
             # If it's a Railway internal endpoint, use port 9000
-            if "railway.internal" in endpoint:
+            if is_railway_internal:
                 port = 9000
+                logger.info(f"Detected Railway internal endpoint, using port {port}")
             else:
                 # Use the specified port or default to 443 for secure, 80 for non-secure
                 port = int(endpoint_parts[1]) if len(endpoint_parts) > 1 else (443 if MINIO_SECURE else 80)
         else:
             port = 443 if MINIO_SECURE else 80
             
-        logger.debug(f"Connecting to MinIO at {endpoint}:{port} (secure={MINIO_SECURE})")
+        logger.info(f"Connecting to MinIO at {endpoint}:{port} (secure={MINIO_SECURE})")
         
-        minio_client = Minio(
-            endpoint,
-            access_key=MINIO_ACCESS_KEY,
-            secret_key=MINIO_SECRET_KEY,
-            secure=MINIO_SECURE,
-            port=port
-        )
+        # For Railway internal endpoints, we need to ensure we're using the right configuration
+        if is_railway_internal:
+            logger.info("Using Railway internal MinIO configuration")
+            minio_client = Minio(
+                endpoint,
+                access_key=MINIO_ACCESS_KEY,
+                secret_key=MINIO_SECRET_KEY,
+                secure=False,  # Railway internal endpoints use HTTP
+                port=port
+            )
+        else:
+            minio_client = Minio(
+                endpoint,
+                access_key=MINIO_ACCESS_KEY,
+                secret_key=MINIO_SECRET_KEY,
+                secure=MINIO_SECURE,
+                port=port
+            )
         
         # Check if bucket exists, create if it doesn't
         if not minio_client.bucket_exists(MINIO_BUCKET_NAME):
@@ -197,12 +217,17 @@ def _upload_to_minio(
 ) -> Tuple[bool, str]:
     """Upload a file to MinIO storage."""
     try:
-        # Log MinIO client state
-        logger.debug(f"MinIO client: endpoint={MINIO_ENDPOINT}, bucket={MINIO_BUCKET_NAME}, secure={MINIO_SECURE}")
+        # Log MinIO client state with more details
+        logger.info(f"MinIO upload attempt - Details:")
+        logger.info(f"  - Endpoint: {MINIO_ENDPOINT}")
+        logger.info(f"  - Bucket: {MINIO_BUCKET_NAME}")
+        logger.info(f"  - Secure: {MINIO_SECURE}")
+        logger.info(f"  - Object name: {object_name}")
+        logger.info(f"  - Content type: {content_type}")
         
         # Ensure MinIO client is initialized
         if minio_client is None:
-            logger.error("MinIO client is not initialized")
+            logger.error("MinIO client is not initialized - check credentials and endpoint")
             return False, ""
             
         # Convert file_data to appropriate format
@@ -256,7 +281,19 @@ def _upload_to_minio(
         logger.info(f"Successfully uploaded to MinIO: {object_name}")
         return True, url
     except Exception as e:
-        logger.error(f"MinIO upload failed: {str(e)}")
+        import traceback
+        error_trace = traceback.format_exc()
+        logger.error(f"MinIO upload failed with error: {str(e)}")
+        logger.error(f"Error details: {error_trace}")
+        
+        # Check for specific error types
+        if "ConnectionError" in str(e) or "Connection refused" in str(e):
+            logger.error("Connection error - Check if MinIO service is running and accessible")
+        elif "AccessDenied" in str(e) or "InvalidAccessKeyId" in str(e):
+            logger.error("Authentication error - Check your MinIO credentials")
+        elif "NoSuchBucket" in str(e):
+            logger.error(f"Bucket '{MINIO_BUCKET_NAME}' does not exist - Check bucket name or try to create it")
+        
         return False, ""
 
 def _upload_to_gcs(
