@@ -19,8 +19,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Storage configuration
-DEFAULT_STORAGE = "minio"  # Force MinIO as default
-FALLBACK_STORAGE = "none"  # Disable fallback to avoid GCP
+# Updated on May 9, 2025 to force deployment
+DEFAULT_STORAGE = os.getenv("DEFAULT_STORAGE", "minio")  # Use environment variable with MinIO default
+FALLBACK_STORAGE = os.getenv("FALLBACK_STORAGE", "none")  # Use environment variable with no fallback default
 
 # MinIO configuration
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "")
@@ -53,8 +54,9 @@ def init_minio_client():
         # Extract the endpoint without protocol
         endpoint = MINIO_ENDPOINT.replace("http://", "").replace("https://", "")
         
-        # Special handling for Railway internal endpoints
+        # Special handling for Railway endpoints
         is_railway_internal = "railway.internal" in endpoint
+        is_railway_app = "railway.app" in endpoint
         
         # Remove any port specification if present
         if ":" in endpoint:
@@ -72,7 +74,7 @@ def init_minio_client():
             
         logger.info(f"Connecting to MinIO at {endpoint}:{port} (secure={MINIO_SECURE})")
         
-        # For Railway internal endpoints, we need to ensure we're using the right configuration
+        # For Railway endpoints, we need to ensure we're using the right configuration
         if is_railway_internal:
             logger.info("Using Railway internal MinIO configuration")
             minio_client = Minio(
@@ -81,6 +83,22 @@ def init_minio_client():
                 secret_key=MINIO_SECRET_KEY,
                 secure=False,  # Railway internal endpoints use HTTP
                 port=port
+            )
+        elif is_railway_app:
+            logger.info("Using Railway cross-project MinIO configuration")
+            # For cross-project access, we need to use HTTPS and the public endpoint
+            # Extract the domain without the protocol
+            domain = endpoint
+            if "/" in domain:
+                domain = domain.split("/")[0]  # Get just the domain part
+                
+            logger.info(f"Connecting to cross-project MinIO at {domain} (secure=True)")
+            minio_client = Minio(
+                domain,
+                access_key=MINIO_ACCESS_KEY,
+                secret_key=MINIO_SECRET_KEY,
+                secure=True,  # Cross-project access requires HTTPS
+                region="auto"  # Auto-detect region
             )
         else:
             minio_client = Minio(
@@ -268,13 +286,17 @@ def _upload_to_minio(
         endpoint = MINIO_ENDPOINT.replace("http://", "").replace("https://", "")
         protocol = "https" if MINIO_SECURE else "http"
         
-        # For Railway internal endpoints, use the public URL format
+        # For Railway endpoints, use the appropriate URL format
         if "railway.internal" in endpoint:
             # Use the Railway public URL without port specification for public access
             url = f"https://bucket-production-dce5.up.railway.app/{MINIO_BUCKET_NAME}/{object_name}"
             
             # For internal operations, continue using the internal endpoint
-            logger.debug(f"Using Railway internal endpoint for MinIO: {MINIO_ENDPOINT}")
+            logger.info(f"Using Railway internal endpoint for MinIO: {MINIO_ENDPOINT}")
+        elif "railway.app" in endpoint:
+            # For cross-project Railway endpoints, use the endpoint as is
+            url = f"{MINIO_ENDPOINT}/{MINIO_BUCKET_NAME}/{object_name}"
+            logger.info(f"Using Railway cross-project endpoint: {MINIO_ENDPOINT}")
         else:
             url = f"{protocol}://{endpoint}/{MINIO_BUCKET_NAME}/{object_name}"
         
