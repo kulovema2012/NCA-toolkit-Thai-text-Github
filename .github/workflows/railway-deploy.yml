@@ -4,8 +4,14 @@
 name: Deploy to Railway (Disabled)
 
 on:
-  # Removed push trigger to disable automatic deployment through GitHub Actions
-  workflow_dispatch: # Manual trigger only for testing
+  # Using a non-existent event to completely disable this workflow
+  # while keeping the file for reference
+  workflow_call:
+    inputs:
+      disabled:
+        description: "This workflow is completely disabled"
+        required: true
+        type: boolean
 
 jobs:
   deploy:
