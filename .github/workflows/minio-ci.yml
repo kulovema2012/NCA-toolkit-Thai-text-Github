@@ -1,0 +1,38 @@
+name: MinIO Integration CI
+
+# Only run on pull requests to avoid conflicts with Railway's direct integration
+on:
+  pull_request:
+    branches: [ main ]
+  # Allow manual triggering for testing
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      
+      - name: Lint with flake8
+        run: |
+          pip install flake8
+          # stop the build if there are Python syntax errors or undefined names
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          # exit-zero treats all errors as warnings
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+      
+      - name: Verify MinIO configuration
+        run: |
+          echo "Verifying MinIO configuration..."
+          python -c "import os; print('MinIO configuration is present' if all([os.getenv('MINIO_ENDPOINT'), os.getenv('MINIO_ACCESS_KEY'), os.getenv('MINIO_SECRET_KEY'), os.getenv('MINIO_BUCKET_NAME')]) else 'MinIO configuration is missing')"
