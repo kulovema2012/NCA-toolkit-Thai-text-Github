@@ -598,8 +598,18 @@ def process_add_title_to_image(image_url, title_lines, font_size, font_color,
                 logger.info(f"[DEBUG] Line {i+1} contains words to highlight")
                 # Split the line into words while preserving Thai word boundaries
                 import re
+                # Check if text is primarily Thai
+                is_thai = bool(re.search(r'[\u0E00-\u0E7F]', line))
+                
                 # This regex pattern will match Thai words and other words with spaces
-                words = re.findall(r'[\u0E00-\u0E7F]+|[^\s]+', line)
+                if is_thai:
+                    # Use pythainlp for proper Thai word tokenization
+                    from pythainlp import word_tokenize
+                    words = word_tokenize(line, engine="newmm")
+                else:
+                    # For non-Thai text, use regular expression
+                    words = re.findall(r'[\u0E00-\u0E7F]+|[^\s]+', line)
+                    
                 logger.info(f"[DEBUG] Split line into words: {words}")
                 
                 current_x = x_pos
@@ -616,7 +626,11 @@ def process_add_title_to_image(image_url, title_lines, font_size, font_color,
                             break
                     
                     # Draw the word with appropriate color
-                    word_width = draw.textlength(word_to_draw + ' ', font=font)
+                    # For Thai text, don't add space after the word when measuring width
+                    if is_thai:
+                        word_width = draw.textlength(word_to_draw, font=font)
+                    else:
+                        word_width = draw.textlength(word_to_draw + ' ', font=font)
                     
                     # Draw word border if specified
                     if border_width > 0 and word_color != font_color:
@@ -629,8 +643,13 @@ def process_add_title_to_image(image_url, title_lines, font_size, font_color,
                     # Draw the word
                     draw.text((current_x, y_pos), word_to_draw, font=font, fill=word_color)
                     
-                    # Add space after the word
+                    # Add space after the word (only for non-Thai text)
                     current_x += word_width
+                    
+                    # Add space between words only for non-Thai text
+                    if not is_thai and word != words[-1]:  # Don't add space after the last word
+                        # Space width is already included in word_width for non-Thai text
+                        pass
             else:
                 # Draw the main text normally if no highlighting needed
                 draw.text((x_pos, y_pos), line, font=font, fill=font_color)

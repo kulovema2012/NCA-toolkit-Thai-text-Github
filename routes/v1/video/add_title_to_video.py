@@ -231,9 +231,17 @@ def smart_split_thai_text(text, max_chars_per_line=30):
     
     for word in words:
         # Check if adding this word would exceed the max line length
-        if len(current_line) + len(word) + (1 if current_line else 0) <= max_chars_per_line:
+        test_line = current_line + ("" if not current_line else (" " if not is_thai else "")) + word
+        
+        if len(test_line) <= max_chars_per_line:
+            # Add the word to the current line (with space for non-Thai text only)
             if current_line:
-                current_line += " " + word
+                if is_thai:
+                    # For Thai text, don't add spaces between words
+                    current_line += word
+                else:
+                    # For non-Thai text, add spaces between words
+                    current_line += " " + word
             else:
                 current_line = word
         else:
